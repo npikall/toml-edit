@@ -65,6 +65,11 @@ tasks:
     cmds:
       - go test ./lexer -run '^$' -fuzz FuzzLexer -fuzztime {{.FUZZTIME | default "30s"}}
 
+  fuzz:parser:
+    desc: Fuzz the parser round-trip (default 30s, override with FUZZTIME)
+    cmds:
+      - go test ./parser -run '^$' -fuzz FuzzParse -fuzztime {{.FUZZTIME | default "30s"}}
+
   ci:
     desc: Run the full ci suite
     cmds:
