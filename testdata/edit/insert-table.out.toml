@@ -1,0 +1,16 @@
+title = "x"
+
+[server]
+port = 80
+
+[a.b]
+c = 1
+
+[database]
+url = "pg"
+
+[server.tls]
+cert = "a.pem"
+
+[a]
+name = "A"

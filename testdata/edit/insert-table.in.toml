@@ -1,0 +1,7 @@
+title = "x"
+
+[server]
+port = 80
+
+[a.b]
+c = 1

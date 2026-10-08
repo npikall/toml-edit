@@ -41,6 +41,41 @@ var editCases = map[string]func(*tomledit.Document) error{
 	"set-crlf": func(d *tomledit.Document) error {
 		return d.Set([]string{"b"}, eval.LocalDate{Year: 2025, Month: 1, Day: 31})
 	},
+	"delete-table": func(d *tomledit.Document) error {
+		return errors.Join(d.Delete("server"), d.Delete("log"), d.Delete("plugin"))
+	},
+	"delete-inline-entry": func(d *tomledit.Document) error {
+		return errors.Join(
+			d.Delete("first", "x"),
+			d.Delete("last", "y"),
+			d.Delete("middle", "y"),
+			d.Delete("only", "x"),
+			d.Delete("trailing", "y"),
+			d.Delete("dotted", "a"),
+			d.Delete("multi", "y"),
+			d.Delete("multi-trailing", "x"),
+		)
+	},
+	"insert-table": func(d *tomledit.Document) error {
+		return errors.Join(
+			d.Insert([]string{"database", "url"}, "pg"),
+			d.Insert([]string{"server", "tls", "cert"}, "a.pem"),
+			d.Insert([]string{"a", "name"}, "A"),
+		)
+	},
+	"insert-inline-entry": func(d *tomledit.Document) error {
+		return errors.Join(
+			d.Insert([]string{"empty", "k"}, 1),
+			d.Insert([]string{"spaced", "y"}, 2),
+			d.Insert([]string{"tight", "y"}, 2),
+			d.Insert([]string{"trailing", "y"}, 2),
+			d.Insert([]string{"nested", "a", "c"}, 2),
+			d.Insert([]string{"nested", "c", "e"}, 3),
+			d.Insert([]string{"nested", "f", "g"}, 4),
+			d.Insert([]string{"multi", "z"}, 3),
+			d.Insert([]string{"multi-trailing", "y"}, 2),
+		)
+	},
 }
 
 func TestEditGolden(t *testing.T) {

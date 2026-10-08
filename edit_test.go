@@ -132,3 +132,91 @@ func TestSetRebuildsSemanticTree(t *testing.T) {
 	require.NoError(t, doc.Set([]string{"x", "y"}, "z"))
 	require.Equal(t, "x = { y = \"z\" }\n", doc.String())
 }
+
+func TestDeleteKeyValue(t *testing.T) {
+	doc := parse(t, "a = 1\n# second\nb = 2 # two\nc = 3\n")
+	require.NoError(t, doc.Delete("b"))
+
+	_, ok := doc.Get("b")
+	require.False(t, ok)
+	require.Equal(t, "a = 1\nc = 3\n", doc.String())
+}
+
+func TestDeleteErrors(t *testing.T) {
+	doc := parse(t, "a = 1\n[[aot]]\nx = 1\n")
+	for _, path := range [][]string{nil, {"missing"}, {"a", "b"}, {"aot", "x"}} {
+		require.ErrorIs(t, doc.Delete(path...), tomledit.ErrNotFound, path)
+	}
+	require.Equal(t, "a = 1\n[[aot]]\nx = 1\n", doc.String())
+}
+
+func TestInsertAppendsToSection(t *testing.T) {
+	doc := parse(t, "a = 1\n\n[t]\n  x = 1 # one\n\n[u]\n")
+	require.NoError(t, doc.Insert([]string{"b"}, 2))
+	require.NoError(t, doc.Insert([]string{"t", "y"}, "two"))
+	require.NoError(t, doc.Insert([]string{"u", "z"}, 3.5))
+
+	y, err := doc.GetString("t", "y")
+	require.NoError(t, err)
+	require.Equal(t, "two", y)
+	require.Equal(t, "a = 1\nb = 2\n\n[t]\n  x = 1 # one\n  y = \"two\"\n\n[u]\nz = 3.5\n", doc.String())
+}
+
+func TestInsertUnderDottedTable(t *testing.T) {
+	doc := parse(t, "log.level = \"info\"\n[srv]\nhttp.tls.on = true\n")
+	require.NoError(t, doc.Insert([]string{"log", "file"}, "x.log"))
+	require.NoError(t, doc.Insert([]string{"srv", "http", "tls", "cert"}, "a.pem"))
+	require.NoError(t, doc.Insert([]string{"srv", "http", "auth", "user"}, "bob"))
+
+	require.Equal(t, "log.level = \"info\"\nlog.file = \"x.log\"\n[srv]\nhttp.tls.on = true\n"+
+		"http.tls.cert = \"a.pem\"\nhttp.auth.user = \"bob\"\n", doc.String())
+}
+
+func TestInsertNewTableAtEndOfDocument(t *testing.T) {
+	cases := map[string]string{
+		"":               "[t]\ny = 2\n",
+		"x = 1":          "x = 1\n\n[t]\ny = 2\n",
+		"x = 1\n\n\n":    "x = 1\n\n\n[t]\ny = 2\n",
+		"x = 1\n# end\n": "x = 1\n# end\n\n[t]\ny = 2\n",
+		"x = 1\r\n":      "x = 1\r\n\r\n[t]\r\ny = 2\r\n",
+		"[s]\nx = 1 # c": "[s]\nx = 1 # c\n\n[t]\ny = 2\n",
+	}
+	for in, want := range cases {
+		doc := parse(t, in)
+		require.NoError(t, doc.Insert([]string{"t", "y"}, 2), in)
+		require.Equal(t, want, doc.String(), in)
+	}
+}
+
+func TestInsertErrors(t *testing.T) {
+	const src = "a = 1\nt = { x = 1 }\n[[aot]]\n"
+	doc := parse(t, src)
+	cases := []struct {
+		path []string
+		want error
+	}{
+		{nil, tomledit.ErrNotFound},
+		{[]string{"a"}, tomledit.ErrExists},
+		{[]string{"t", "x"}, tomledit.ErrExists},
+		{[]string{"a", "b"}, tomledit.ErrNotTable},
+		{[]string{"aot", "b"}, tomledit.ErrNotTable},
+	}
+	for _, c := range cases {
+		require.ErrorIs(t, doc.Insert(c.path, 2), c.want, c.path)
+	}
+	require.ErrorIs(t, doc.Insert([]string{"b"}, struct{}{}), format.ErrUnsupported)
+	require.Equal(t, src, doc.String())
+}
+
+func TestInlineEditsKeepEntryComments(t *testing.T) {
+	doc := parse(t, "t = {\n  x = 1,\n  # second\n  y = 2\n}\nu = {\n  x = 1, # c\n}\n")
+	require.NoError(t, doc.Delete("t", "x"))
+	require.NoError(t, doc.Insert([]string{"u", "y"}, 2))
+	require.Equal(t, "t = {\n  # second\n  y = 2\n}\nu = {\n  x = 1, # c\n  y = 2,\n}\n", doc.String())
+}
+
+func TestInsertUsesLineEndingOfFirstLine(t *testing.T) {
+	doc := parse(t, "a = 1\ns = \"\"\"x\r\ny\"\"\"\n")
+	require.NoError(t, doc.Insert([]string{"b"}, 2))
+	require.Equal(t, "a = 1\ns = \"\"\"x\r\ny\"\"\"\nb = 2\n", doc.String())
+}

@@ -1,0 +1,12 @@
+first = {y = 2}
+last = { x = 1 }
+middle = { x = 1, z = 3 }
+only = {}
+trailing = { x = 1, }
+dotted = { d = 3 }
+multi = {
+  x = 1 # one
+}
+multi-trailing = {
+  y = 2,
+}

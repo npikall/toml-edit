@@ -1,0 +1,7 @@
+# service config
+name = "svc"
+keep.me = true
+
+# storage
+[database]
+url = "postgres://"

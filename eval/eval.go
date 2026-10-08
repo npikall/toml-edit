@@ -32,6 +32,8 @@ type Table struct {
 	kind    tableKind
 	aot     map[string]bool          // keys holding an [[array of tables]]
 	nodes   map[string]*ast.KeyValue // keys defined by a key/value
+	section *ast.Table               // set for the root and [header] tables
+	inline  *ast.InlineTable         // set for inline tables
 }
 
 func newTable(kind tableKind) *Table {
@@ -56,6 +58,18 @@ func (t *Table) KeyValue(key string) (*ast.KeyValue, bool) {
 	return kv, ok
 }
 
+// Section returns the CST section whose body holds t's key/values: the root
+// section, or the section of the [header] or [[header]] that defined t. It
+// is nil for tables defined implicitly, by dotted keys or inline.
+func (t *Table) Section() *ast.Table { return t.section }
+
+// Inline returns the CST node of an inline table. It is nil for other
+// tables.
+func (t *Table) Inline() *ast.InlineTable { return t.inline }
+
+// Dotted reports whether t was defined by dotted keys.
+func (t *Table) Dotted() bool { return t.kind == kindDotted }
+
 func (t *Table) set(key string, v any) {
 	if _, ok := t.entries[key]; !ok {
 		t.keys = append(t.keys, key)
@@ -66,6 +80,7 @@ func (t *Table) set(key string, v any) {
 // Evaluate builds the table tree of doc and validates it.
 func Evaluate(doc *ast.Document) (*Table, error) {
 	root := newTable(kindExplicit)
+	root.section = doc.Root
 	if err := insertBody(root, doc.Root.Body); err != nil {
 		return nil, err
 	}
@@ -74,6 +89,7 @@ func Evaluate(doc *ast.Document) (*Table, error) {
 		if err != nil {
 			return nil, err
 		}
+		t.section = section
 		if err := insertBody(t, section.Body); err != nil {
 			return nil, err
 		}
@@ -214,6 +230,18 @@ func descendDotted(t *Table, part *ast.KeyPart) (*Table, error) {
 	default:
 		return nil, errorAt(part.Pos, "key %q is already defined as a value", name)
 	}
+}
+
+// KeyNames returns the decoded names of the parts of key.
+func KeyNames(key *ast.Key) ([]string, error) {
+	names := make([]string, len(key.Parts))
+	for i, part := range key.Parts {
+		var err error
+		if names[i], err = keyName(part); err != nil {
+			return nil, err
+		}
+	}
+	return names, nil
 }
 
 func keyName(part *ast.KeyPart) (string, error) {

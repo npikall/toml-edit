@@ -25,6 +25,7 @@ func decodeValue(v ast.Value) (any, error) {
 		return out, nil
 	case *ast.InlineTable:
 		t := newTable(kindInline)
+		t.inline = v
 		for _, entry := range v.Entries {
 			if err := insertKeyValue(t, entry.KeyValue); err != nil {
 				return nil, err

@@ -1,0 +1,25 @@
+# service config
+name = "svc"
+log.level = "info"
+log.file = "/var/log/svc"
+keep.me = true
+
+# HTTP server
+[server]
+port = 8080
+
+[server.tls]
+cert = "a.pem"
+
+# storage
+[database]
+url = "postgres://"
+
+[[plugin]]
+name = "a"
+
+[plugin.opts]
+x = 1
+
+[[plugin]]
+name = "b"

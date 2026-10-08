@@ -6,6 +6,7 @@ package tomledit
 import (
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/npikall/toml-edit/ast"
@@ -23,6 +24,11 @@ var (
 	// ErrType is returned by the typed getters when the value has a
 	// different type.
 	ErrType = errors.New("wrong value type")
+	// ErrExists is returned by Insert when the key path already exists.
+	ErrExists = errors.New("key already exists")
+	// ErrNotTable is returned by Insert when the parent of the key path is
+	// not a table.
+	ErrNotTable = errors.New("key does not hold a table")
 )
 
 // Document is a parsed TOML document. Its String method returns the source
@@ -87,6 +93,32 @@ func (d *Document) Set(path []string, value any) error {
 	return nil
 }
 
+// Insert adds a new key with value at the end of the table section that
+// owns it, indented like the key/value before it.
+func (d *Document) Insert(path []string, value any) error {
+	if err := d.insert(path, value); err != nil {
+		return fmt.Errorf("%s: %w", dotted(path), err)
+	}
+	return nil
+}
+
+// Delete removes the key at the key path together with the comments and
+// blank lines before it. Deleting a table removes its header, its key/values
+// and all its sub-tables.
+func (d *Document) Delete(keys ...string) error {
+	if err := d.delete(keys); err != nil {
+		return fmt.Errorf("%s: %w", dotted(keys), err)
+	}
+	return nil
+}
+
+func (d *Document) delete(keys []string) error {
+	if _, ok := d.Get(keys...); !ok || len(keys) == 0 {
+		return ErrNotFound
+	}
+	return d.mutate(func() { deletePath(d.cst, keys) })
+}
+
 func (d *Document) set(path []string, value any) error {
 	kv, err := d.keyValue(path)
 	if err != nil {
@@ -129,6 +161,81 @@ func (d *Document) keyValue(path []string) (*ast.KeyValue, error) {
 	return kv, nil
 }
 
+func (d *Document) insert(path []string, value any) error {
+	if len(path) == 0 {
+		return ErrNotFound
+	}
+	if _, ok := d.Get(path...); ok {
+		return ErrExists
+	}
+	node, err := format.Value(value)
+	if err != nil {
+		return fmt.Errorf("format: %w", err)
+	}
+	// Walk to the deepest existing table on the path, remembering the
+	// nearest section that holds key/values for it.
+	table, depth := d.root, 0
+	owner, ownerDepth := table.Section(), 0
+	var inline *ast.InlineTable
+	inlineDepth := 0
+	for _, key := range path[:len(path)-1] {
+		v, ok := table.Get(key)
+		if !ok {
+			break
+		}
+		if table, ok = v.(*eval.Table); !ok {
+			return ErrNotTable
+		}
+		depth++
+		if section := table.Section(); section != nil {
+			owner, ownerDepth = section, depth
+		}
+		if node := table.Inline(); node != nil {
+			inline, inlineDepth = node, depth
+		}
+	}
+	nl := d.newline()
+	switch {
+	case inline != nil:
+		kv := newKeyValue(path[inlineDepth:], node, "")
+		return d.mutate(func() { appendEntry(inline, kv) })
+	case table.Section() != nil && depth == len(path)-1, table.Dotted():
+		kv := newKeyValue(path[ownerDepth:], node, nl)
+		return d.mutate(func() { appendKeyValue(owner, kv) })
+	default:
+		// A missing or implicit table gets a [header] of its own.
+		kv := newKeyValue(path[len(path)-1:], node, nl)
+		return d.mutate(func() { appendTable(d.cst, path[:len(path)-1], kv, nl) })
+	}
+}
+
+// newline returns the line ending of the document's first line.
+func (d *Document) newline() string {
+	text := d.String()
+	if i := strings.Index(text, "\n"); i > 0 && text[i-1] == '\r' {
+		return "\r\n"
+	}
+	return "\n"
+}
+
+// mutate applies change to the CST and re-evaluates it. If the result is
+// invalid, the document is restored.
+func (d *Document) mutate(change func()) error {
+	before := d.String()
+	change()
+	root, err := eval.Evaluate(d.cst)
+	if err != nil {
+		cst, parseErr := parser.Parse(before)
+		if parseErr != nil {
+			panic(fmt.Sprintf("tomledit: cannot restore document: %v", parseErr))
+		}
+		d.cst = cst
+		return fmt.Errorf("evaluate: %w", err)
+	}
+	d.root = root
+	return nil
+}
+
 // get returns the value at keys if it has type T.
 //
 //nolint:ireturn // T is a concrete value type chosen by the typed getters.
@@ -147,3 +254,206 @@ func get[T any](d *Document, keys []string) (T, error) {
 
 // dotted renders a key path for error messages.
 func dotted(path []string) string { return strings.Join(path, ".") }
+
+// appendTable adds a [path] section holding kv at the end of doc, separated
+// from the text before it by a blank line.
+func appendTable(doc *ast.Document, path []string, kv *ast.KeyValue, nl string) {
+	header := &ast.TableHeader{Key: newKey(path), Trailing: nl}
+	if text := doc.String(); text != "" {
+		header.Leading = doc.Trailing
+		if !strings.HasSuffix(text, "\n") {
+			text += nl
+			header.Leading += nl
+		}
+		if !strings.HasSuffix(text, nl+nl) {
+			header.Leading += nl
+		}
+	}
+	doc.Trailing = ""
+	doc.Tables = append(doc.Tables, &ast.Table{Header: header, Body: []*ast.KeyValue{kv}})
+}
+
+// newKey returns the key for path, quoting names that cannot be bare.
+func newKey(path []string) *ast.Key {
+	key := &ast.Key{}
+	for _, name := range path {
+		key.Parts = append(key.Parts, format.Key(name))
+	}
+	return key
+}
+
+// newKeyValue returns "k1.k2 = value" followed by newline.
+func newKeyValue(path []string, value ast.Value, newline string) *ast.KeyValue {
+	key := newKey(path)
+	key.Parts[len(key.Parts)-1].Suffix = " "
+	ast.ValueDecor(value).Prefix = " "
+	return &ast.KeyValue{Key: key, Value: value, Trailing: newline}
+}
+
+// appendKeyValue adds kv to the end of section with the indentation of the
+// section's last key/value.
+func appendKeyValue(section *ast.Table, kv *ast.KeyValue) {
+	if n := len(section.Body); n > 0 {
+		last := section.Body[n-1]
+		kv.Leading = lastLine(last.Leading)
+		last.Trailing = endLine(last.Trailing, kv.Trailing)
+	} else if section.Header != nil {
+		section.Header.Trailing = endLine(section.Header.Trailing, kv.Trailing)
+	}
+	section.Body = append(section.Body, kv)
+}
+
+// appendEntry adds kv to the end of an inline table, spaced like the entry
+// before it, and moves the trivia before "}" so the commas stay balanced.
+func appendEntry(table *ast.InlineTable, kv *ast.KeyValue) {
+	entry := &ast.InlineEntry{KeyValue: kv}
+	n := len(table.Entries)
+	if n == 0 {
+		kv.Leading, table.Trailing = " ", " "
+		table.Entries = []*ast.InlineEntry{entry}
+		return
+	}
+	last := table.Entries[n-1]
+	kv.Leading = lastLine(last.KeyValue.Leading)
+	if kv.Leading == "" {
+		kv.Leading = " "
+	}
+	if table.TrailingComma {
+		entry.AfterComma = lineEnding(last.AfterComma)
+	} else {
+		addComma(last, kv)
+	}
+	table.Entries = append(table.Entries, entry)
+}
+
+// addComma gives the last entry of an inline table a comma before kv is
+// appended after it: the rest of its line goes after the comma, the
+// indentation of "}" after kv.
+func addComma(last *ast.InlineEntry, kv *ast.KeyValue) {
+	moved := last.KeyValue.Trailing
+	last.KeyValue.Trailing = ""
+	i := strings.Index(moved, "\n")
+	if i < 0 {
+		kv.Trailing = moved
+		return
+	}
+	last.AfterComma = moved[:i+1]
+	kv.Trailing = "\n" + moved[i+1:]
+	if strings.HasSuffix(last.AfterComma, "\r\n") {
+		kv.Trailing = "\r" + kv.Trailing
+	}
+}
+
+// lastLine returns the text after the last newline in s.
+func lastLine(s string) string { return s[strings.LastIndex(s, "\n")+1:] }
+
+// lineEnding returns the newline that ends s, or "" if s does not end one.
+func lineEnding(s string) string {
+	switch {
+	case strings.HasSuffix(s, "\r\n"):
+		return "\r\n"
+	case strings.HasSuffix(s, "\n"):
+		return "\n"
+	}
+	return ""
+}
+
+// endLine returns trailing trivia that ends with a newline, which it lacks
+// only at the end of the document.
+func endLine(trailing, newline string) string {
+	if strings.HasSuffix(trailing, "\n") {
+		return trailing
+	}
+	return trailing + newline
+}
+
+// deletePath removes from doc every table section whose header lies at or
+// below path, and every key/value that defines path or a key below it.
+func deletePath(doc *ast.Document, path []string) {
+	doc.Root.Body = deleteKeyValues(doc.Root.Body, nil, path)
+	tables := doc.Tables[:0]
+	for _, section := range doc.Tables {
+		header := keyNames(section.Header.Key)
+		if hasPrefix(header, path) {
+			continue
+		}
+		section.Body = deleteKeyValues(section.Body, header, path)
+		tables = append(tables, section)
+	}
+	doc.Tables = tables
+}
+
+// deleteKeyValues removes the key/values of a section at base that define
+// path or a key below it.
+func deleteKeyValues(body []*ast.KeyValue, base, path []string) []*ast.KeyValue {
+	kept := body[:0]
+	for _, kv := range body {
+		if deleteKeyValue(kv, base, path) {
+			continue
+		}
+		kept = append(kept, kv)
+	}
+	return kept
+}
+
+// deleteKeyValue reports whether kv, found in a table at base, defines path
+// or a key below it. If path lies inside kv's inline table, it deletes the
+// matching entries from that table instead.
+func deleteKeyValue(kv *ast.KeyValue, base, path []string) bool {
+	key := append(slices.Clip(base), keyNames(kv.Key)...)
+	if hasPrefix(key, path) {
+		return true
+	}
+	if table, ok := kv.Value.(*ast.InlineTable); ok && hasPrefix(path, key) {
+		for i, entry := range slices.Backward(table.Entries) {
+			if deleteKeyValue(entry.KeyValue, key, path) {
+				deleteEntry(table, i)
+			}
+		}
+	}
+	return false
+}
+
+// deleteEntry removes entry i of an inline table and moves the trivia
+// around it so the commas and the spacing inside the braces stay balanced.
+func deleteEntry(table *ast.InlineTable, i int) {
+	removed := table.Entries[i].KeyValue
+	table.Entries = slices.Delete(table.Entries, i, i+1)
+	switch {
+	case len(table.Entries) == 0:
+		table.TrailingComma, table.Trailing = false, ""
+	case i == 0:
+		// The new first entry takes the removed entry's place after "{",
+		// keeping comment lines of its own.
+		next := table.Entries[0].KeyValue
+		if strings.Contains(next.Leading, "\n") {
+			next.Leading = strings.TrimSuffix(removed.Leading, lastLine(removed.Leading)) + next.Leading
+		} else {
+			next.Leading = removed.Leading
+		}
+	case i == len(table.Entries) && !table.TrailingComma:
+		// The new last entry loses its comma; the rest of its line and the
+		// indentation of "}" become the trivia before "}".
+		last := table.Entries[i-1]
+		if last.AfterComma != "" {
+			last.KeyValue.Trailing += last.AfterComma + lastLine(removed.Trailing)
+		} else {
+			last.KeyValue.Trailing += removed.Trailing
+		}
+		last.AfterComma = ""
+	}
+}
+
+// keyNames returns the decoded parts of a key that the evaluator accepted.
+func keyNames(key *ast.Key) []string {
+	n, err := eval.KeyNames(key)
+	if err != nil {
+		panic(fmt.Sprintf("tomledit: invalid key in evaluated document: %v", err))
+	}
+	return n
+}
+
+// hasPrefix reports whether the key path s starts with prefix.
+func hasPrefix(s, prefix []string) bool {
+	return len(s) >= len(prefix) && slices.Equal(s[:len(prefix)], prefix)
+}
