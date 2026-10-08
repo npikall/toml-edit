@@ -120,11 +120,14 @@ func (l *Lexer) readMultilineEscape() bool {
 func (l *Lexer) readEscape() bool {
 	l.readChar() // backslash
 	switch l.ch {
-	case '"', '\\', 'b', 'e', 'f', 'n', 'r', 't':
+	case '"', '\\', 'b', 'f', 'n', 'r', 't':
 		l.readChar()
 		return true
+	case 'e':
+		l.readChar()
+		return !l.strict10
 	case 'x':
-		return l.readHexDigits(hexEscapeLen)
+		return l.readHexDigits(hexEscapeLen) && !l.strict10
 	case 'u':
 		return l.readHexDigits(shortUnicodeEscLen)
 	case 'U':

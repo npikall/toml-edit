@@ -1,6 +1,18 @@
 // Package tomledit reads and edits TOML documents while preserving their
 // formatting: comments, whitespace, key quoting and the spelling of values
 // that are not changed survive every edit byte for byte.
+//
+// Parse accepts TOML 1.1 by default, or only TOML 1.0 with the Strict10
+// option. A parsed Document returns its source unchanged from String until
+// it is edited with Set, Insert or Delete. Every edit is validated; an edit
+// that would make the document invalid is rolled back and reported.
+//
+// Values are read with Get or the typed getters (GetInt, GetString, ...).
+// Integers are int64, floats float64, offset date-times time.Time, and
+// local dates and times the types of package eval. New values are written
+// from Go strings, booleans, integers, floats, time.Time, the eval
+// date/time types, slices (as arrays) and maps with string keys (as inline
+// tables).
 package tomledit
 
 import (
@@ -38,10 +50,17 @@ type Document struct {
 	root *eval.Table
 }
 
-// Parse parses and validates src. The result's String method returns src
-// unchanged until it is edited.
-func Parse(src string) (*Document, error) {
-	cst, err := parser.Parse(src)
+// Option configures Parse.
+type Option = parser.Option
+
+// Strict10 makes Parse accept TOML 1.0 only, rejecting the syntax that 1.1
+// added. Edits never add 1.1 syntax, so an edited document stays valid 1.0.
+func Strict10() Option { return parser.Strict10() }
+
+// Parse parses and validates src as TOML 1.1, or 1.0 with Strict10. The
+// result's String method returns src unchanged until it is edited.
+func Parse(src string, opts ...Option) (*Document, error) {
+	cst, err := parser.Parse(src, opts...)
 	if err != nil {
 		return nil, fmt.Errorf("parse: %w", err)
 	}

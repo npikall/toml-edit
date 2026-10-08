@@ -60,6 +60,22 @@ tasks:
       - go test -coverprofile=c.out ./...
       - go tool cover -html=c.out
 
+  bench:
+    desc: Run the benchmarks
+    aliases: [b]
+    cmds:
+      - go test -run '^$' -bench . -benchmem {{.CLI_ARGS | default "./..."}}
+
+  toml-test:
+    desc: Run the official toml-test runner against the decoder for TOML 1.0 and 1.1
+    vars:
+      BIN: '{{.ROOT_DIR}}/.task/bin'
+    cmds:
+      - go build -o {{.BIN}}/toml-test-decoder ./cmd/toml-test-decoder
+      - GOBIN={{.BIN}} go install github.com/toml-lang/toml-test/v2/cmd/toml-test@v2.2.0
+      - '{{.BIN}}/toml-test test -toml 1.1 -decoder "{{.BIN}}/toml-test-decoder -toml 1.1"'
+      - '{{.BIN}}/toml-test test -toml 1.0 -decoder "{{.BIN}}/toml-test-decoder -toml 1.0"'
+
   fuzz:
     desc: Fuzz the lexer (default 30s, override with FUZZTIME)
     cmds:
@@ -79,4 +95,5 @@ tasks:
     desc: Run the full ci suite
     cmds:
       - task: test
+      - task: toml-test
       - task: lint

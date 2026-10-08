@@ -42,6 +42,26 @@ func TestParseReportsSyntaxAndSemanticErrors(t *testing.T) {
 	require.ErrorAs(t, err, &evalErr)
 }
 
+func TestParseStrict10RejectsTOML11Syntax(t *testing.T) {
+	src := "point = { x = 1, y = 2, }\n"
+	_, err := tomledit.Parse(src)
+	require.NoError(t, err)
+
+	_, err = tomledit.Parse(src, tomledit.Strict10())
+	var parseErr *parser.ParseError
+	require.ErrorAs(t, err, &parseErr)
+}
+
+func TestEditsOfStrict10DocumentStayTOML10(t *testing.T) {
+	doc, err := tomledit.Parse(config, tomledit.Strict10())
+	require.NoError(t, err)
+	require.NoError(t, doc.Set([]string{"title"}, "esc \x1b"))
+	require.NoError(t, doc.Insert([]string{"server", "point", "z"}, eval.LocalTime{Hour: 7, Minute: 32}))
+
+	_, err = tomledit.Parse(doc.String(), tomledit.Strict10())
+	require.NoError(t, err, doc.String())
+}
+
 func TestGet(t *testing.T) {
 	doc := parse(t, config)
 

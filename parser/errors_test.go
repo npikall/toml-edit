@@ -38,3 +38,28 @@ func TestParseSyntaxErrors(t *testing.T) {
 		})
 	}
 }
+
+func TestParseStrict10RejectsTOML11Syntax(t *testing.T) {
+	tests := map[string]struct {
+		src  string
+		want parser.ParseError
+	}{
+		"hex escape":              {`a = "\x41"`, parser.ParseError{Line: 1, Col: 5, Msg: `expected a value, found invalid "\"\\x41\""`}},
+		"esc escape":              {`a = """\e"""`, parser.ParseError{Line: 1, Col: 5, Msg: `expected a value, found invalid "\"\"\"\\e\"\"\""`}},
+		"time without seconds":    {"a = 07:32", parser.ParseError{Line: 1, Col: 5, Msg: `expected a value, found invalid "07:32"`}},
+		"datetime without secs":   {"a = 1979-05-27T07:32Z", parser.ParseError{Line: 1, Col: 5, Msg: `expected a value, found invalid "1979-05-27T07:32Z"`}},
+		"newline in inline table": {"a = {\nb = 1}", parser.ParseError{Line: 1, Col: 6, Msg: "expected a key, found newline"}},
+		"comment in inline table": {"a = {b = 1 # c\n}", parser.ParseError{Line: 1, Col: 12, Msg: `expected "," or "}", found "# c"`}},
+		"inline trailing comma":   {"a = {b = 1,}", parser.ParseError{Line: 1, Col: 12, Msg: `expected a key, found "}"`}},
+	}
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			_, err := parser.Parse(tc.src)
+			require.NoError(t, err, "valid TOML 1.1")
+			_, err = parser.Parse(tc.src, parser.Strict10())
+			var perr *parser.ParseError
+			require.ErrorAs(t, err, &perr)
+			require.Equal(t, tc.want, *perr)
+		})
+	}
+}

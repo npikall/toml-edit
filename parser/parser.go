@@ -25,15 +25,33 @@ func (e *ParseError) Error() string {
 }
 
 type parser struct {
-	toks []token.Token // always ends with EOF
-	pos  int
+	toks     []token.Token // always ends with EOF
+	pos      int
+	strict10 bool
 }
 
-// Parse parses src into a Document whose String method returns src
-// unchanged. It stops at the first syntax error.
-func Parse(src string) (*ast.Document, error) {
+// Option configures Parse.
+type Option func(*parser)
+
+// Strict10 makes Parse reject syntax that TOML 1.1 added to 1.0: the
+// escapes \xHH and \e, times without seconds, and newlines, comments and a
+// trailing comma inside inline tables.
+func Strict10() Option {
+	return func(p *parser) { p.strict10 = true }
+}
+
+// Parse parses src as TOML 1.1, or 1.0 with Strict10, into a Document whose
+// String method returns src unchanged. It stops at the first syntax error.
+func Parse(src string, opts ...Option) (*ast.Document, error) {
 	p := &parser{}
-	l := lexer.New(src)
+	for _, opt := range opts {
+		opt(p)
+	}
+	var lexOpts []lexer.Option
+	if p.strict10 {
+		lexOpts = append(lexOpts, lexer.Strict10())
+	}
+	l := lexer.New(src, lexOpts...)
 	for {
 		tok := l.NextToken()
 		p.toks = append(p.toks, tok)
@@ -195,9 +213,13 @@ func (p *parser) parseArray() (*ast.Array, error) {
 func (p *parser) parseInlineTable() (*ast.InlineTable, error) {
 	p.next() // {
 	table := &ast.InlineTable{}
+	toml11 := !p.strict10 // allow newlines, comments and a trailing comma
 	for {
-		leading := p.trivia(true)
-		if p.peek().Type == token.RBRACE {
+		leading := p.trivia(toml11)
+		if tok := p.peek(); tok.Type == token.RBRACE {
+			if !toml11 && table.TrailingComma {
+				return nil, unexpected(tok, "a key")
+			}
 			p.next()
 			table.Trailing = leading
 			return table, nil
@@ -207,14 +229,16 @@ func (p *parser) parseInlineTable() (*ast.InlineTable, error) {
 			return nil, err
 		}
 		kv.Leading = leading
-		kv.Trailing = p.trivia(true)
+		kv.Trailing = p.trivia(toml11)
 		entry := &ast.InlineEntry{KeyValue: kv}
 		table.Entries = append(table.Entries, entry)
 		table.TrailingComma = false
 		switch tok := p.next(); tok.Type {
 		case token.COMMA:
 			table.TrailingComma = true
-			entry.AfterComma = p.afterComma()
+			if toml11 {
+				entry.AfterComma = p.afterComma()
+			}
 		case token.RBRACE:
 			return table, nil
 		default:

@@ -29,11 +29,24 @@ type Lexer struct {
 
 	expectValue bool      // the next token is a value, not a key
 	stack       []context // open brackets, innermost last
+	strict10    bool      // reject syntax added in TOML 1.1
 }
 
-// Instantiate a new Lexer
-func New(input string) *Lexer {
+// Option configures a Lexer.
+type Option func(*Lexer)
+
+// Strict10 makes the lexer reject syntax that TOML 1.1 added to 1.0: the
+// escapes \xHH and \e, and times without seconds. Such tokens are ILLEGAL.
+func Strict10() Option {
+	return func(l *Lexer) { l.strict10 = true }
+}
+
+// New returns a Lexer for TOML 1.1 input, or 1.0 with Strict10.
+func New(input string, opts ...Option) *Lexer {
 	l := &Lexer{input: input, line: 1}
+	for _, opt := range opts {
+		opt(l)
+	}
 	l.readChar()
 	return l
 }
@@ -64,7 +77,7 @@ func (l *Lexer) NextToken() token.Token {
 	case l.expectValue && isScalarChar(l.ch):
 		l.readScalar()
 		l.expectValue = false
-		tokType = classifyScalar(l.input[start:l.position])
+		tokType = l.valueType(l.input[start:l.position])
 	case l.ch == '.':
 		l.readChar()
 		tokType = token.DOT
@@ -276,7 +289,23 @@ var (
 	reLocalTime      = regexp.MustCompile(`^` + partialTime + `$`)
 	reLocalDateTime  = regexp.MustCompile(`^` + fullDate + `[Tt ]` + partialTime + `$`)
 	reOffsetDateTime = regexp.MustCompile(`^` + fullDate + `[Tt ]` + partialTime + timeOffset + `$`)
+	// reSeconds matches the time part of a time or date-time if it has
+	// seconds. An offset ("+07:00") never matches, as it follows no colon.
+	reSeconds = regexp.MustCompile(`[0-9]{2}:[0-9]{2}:[0-9]{2}`)
 )
+
+// valueType returns the token type of a bare value, which is ILLEGAL if it
+// is no valid value.
+func (l *Lexer) valueType(lit string) token.TokenType {
+	typ := classifyScalar(lit)
+	switch typ {
+	case token.LOCAL_TIME, token.LOCAL_DATETIME, token.OFFSET_DATETIME:
+		if l.strict10 && !reSeconds.MatchString(lit) {
+			return token.ILLEGAL
+		}
+	}
+	return typ
+}
 
 func classifyScalar(lit string) token.TokenType {
 	switch {

@@ -158,11 +158,12 @@ func formatFloat(f float64, bitSize int) string {
 const delChar = 0x7f
 
 var escapes = map[rune]string{
-	'\b': `\b`, '\t': `\t`, '\n': `\n`, '\f': `\f`, '\r': `\r`, 0x1b: `\e`, '"': `\"`, '\\': `\\`,
+	'\b': `\b`, '\t': `\t`, '\n': `\n`, '\f': `\f`, '\r': `\r`, '"': `\"`, '\\': `\\`,
 }
 
 // quote returns s as a basic string, escaping quotes, backslashes and
-// control characters.
+// control characters. It uses no escapes added in TOML 1.1 (\e, \xHH), so
+// the result is valid TOML 1.0 too.
 func quote(s string) string {
 	var sb strings.Builder
 	sb.WriteByte('"')

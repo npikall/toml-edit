@@ -24,10 +24,11 @@ func render(t *testing.T, v any) string {
 	return doc.String()
 }
 
-// decode parses src and returns the value of its key "v".
+// decode parses src as TOML 1.0, which new text must be valid as too, and
+// returns the value of its key "v".
 func decode(t *testing.T, src string) any {
 	t.Helper()
-	doc, err := parser.Parse(src)
+	doc, err := parser.Parse(src, parser.Strict10())
 	require.NoError(t, err, src)
 	table, err := eval.Evaluate(doc)
 	require.NoError(t, err, src)
@@ -42,7 +43,7 @@ func TestValueRendersCanonicalText(t *testing.T) {
 		want string
 	}{
 		{"hello", `v="hello"`},
-		{"a\"b\\c\n\t\x1b\x7f", `v="a\"b\\c\n\t\e\u007F"`},
+		{"a\"b\\c\n\t\x1b\x7f", `v="a\"b\\c\n\t\u001B\u007F"`}, // valid TOML 1.0 too
 		{true, "v=true"},
 		{42, "v=42"},
 		{int8(-7), "v=-7"},
@@ -67,12 +68,13 @@ func TestValueRendersCanonicalText(t *testing.T) {
 	}
 	for _, c := range cases {
 		require.Equal(t, c.want, render(t, c.in), "%#v", c.in)
+		decode(t, c.want)
 	}
 }
 
 func TestValueRoundTripsThroughParser(t *testing.T) {
 	for _, in := range []any{
-		"", "ünïcödé ✓", "\x00\x01\x1f\b\f\r", `C:\path`, "'single'",
+		"", "ünïcödé ✓", "\x00\x01\x1b\x1f\b\f\r", `C:\path`, "'single'",
 		int64(math.MinInt64), int64(math.MaxInt64), uint64(math.MaxInt64),
 		0.1, -0.0, 1e-7, 123456789.125, math.MaxFloat64, math.SmallestNonzeroFloat64,
 	} {
