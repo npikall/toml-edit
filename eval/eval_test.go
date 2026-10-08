@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/npikall/toml-edit/ast"
 	"github.com/npikall/toml-edit/eval"
 	"github.com/npikall/toml-edit/parser"
 	"github.com/stretchr/testify/require"
@@ -245,4 +246,36 @@ func TestEvaluateDottedKeyExtendsImplicitTable(t *testing.T) {
 	requireEval(t, "[a.b.c]\n[a]\nb.d = 1\n", map[string]any{
 		"a": map[string]any{"b": map[string]any{"c": map[string]any{}, "d": int64(1)}},
 	})
+}
+
+func TestTableKeyValuePointsAtCST(t *testing.T) {
+	doc, err := parser.Parse("a.b = 1\n[t]\nc = { d = 2 }\n[[aot]]\ne = 3\n")
+	require.NoError(t, err)
+	root, err := eval.Evaluate(doc)
+	require.NoError(t, err)
+
+	a, _ := root.Get("a")
+	kv, ok := a.(*eval.Table).KeyValue("b")
+	require.True(t, ok)
+	require.Same(t, doc.Root.Body[0], kv)
+
+	tbl, _ := root.Get("t")
+	kv, ok = tbl.(*eval.Table).KeyValue("c")
+	require.True(t, ok)
+	require.Same(t, doc.Tables[0].Body[0], kv)
+
+	c, _ := tbl.(*eval.Table).Get("c")
+	kv, ok = c.(*eval.Table).KeyValue("d")
+	require.True(t, ok)
+	require.Same(t, doc.Tables[0].Body[0].Value.(*ast.InlineTable).Entries[0].KeyValue, kv)
+
+	aot, _ := root.Get("aot")
+	kv, ok = aot.([]any)[0].(*eval.Table).KeyValue("e")
+	require.True(t, ok)
+	require.Same(t, doc.Tables[1].Body[0], kv)
+
+	for _, key := range []string{"a", "t", "aot", "missing"} {
+		_, ok := root.KeyValue(key)
+		require.False(t, ok, key)
+	}
 }

@@ -30,11 +30,12 @@ type Table struct {
 	keys    []string
 	entries map[string]any
 	kind    tableKind
-	aot     map[string]bool // keys holding an [[array of tables]]
+	aot     map[string]bool          // keys holding an [[array of tables]]
+	nodes   map[string]*ast.KeyValue // keys defined by a key/value
 }
 
 func newTable(kind tableKind) *Table {
-	return &Table{entries: map[string]any{}, kind: kind}
+	return &Table{entries: map[string]any{}, kind: kind, nodes: map[string]*ast.KeyValue{}}
 }
 
 // Keys returns the table's keys in the order they were defined.
@@ -45,6 +46,14 @@ func (t *Table) Keys() []string { return t.keys }
 func (t *Table) Get(key string) (any, bool) {
 	v, ok := t.entries[key]
 	return v, ok
+}
+
+// KeyValue returns the CST node that defines key. It reports false for keys
+// that hold a table defined by a header or a dotted key, or an array of
+// tables.
+func (t *Table) KeyValue(key string) (*ast.KeyValue, bool) {
+	kv, ok := t.nodes[key]
+	return kv, ok
 }
 
 func (t *Table) set(key string, v any) {
@@ -174,6 +183,7 @@ func insertKeyValue(t *Table, kv *ast.KeyValue) error {
 		return err
 	}
 	t.set(name, v)
+	t.nodes[name] = kv
 	return nil
 }
 

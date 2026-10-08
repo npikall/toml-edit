@@ -1,0 +1,8 @@
+# Server settings
+[server]
+  host   =   "localhost"   # bind address
+  port   =   8080          # listen port
+  debug  =   true
+
+[client]
+port = 8080

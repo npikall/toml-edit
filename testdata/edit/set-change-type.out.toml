@@ -1,0 +1,3 @@
+[deps]
+alpha = { git = "https://example.com/alpha", version = "2.0" } # pinned
+beta = ["z"]

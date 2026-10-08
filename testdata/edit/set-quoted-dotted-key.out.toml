@@ -1,0 +1,2 @@
+"my key" = "new"  # literal
+site . "google.com" . enabled = true

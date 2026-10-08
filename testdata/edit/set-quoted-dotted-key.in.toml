@@ -1,0 +1,2 @@
+"my key" = 'old'  # literal
+site . "google.com" . enabled = false

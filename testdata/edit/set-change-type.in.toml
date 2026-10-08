@@ -1,0 +1,6 @@
+[deps]
+alpha = "1.0" # pinned
+beta = [
+  "x", # first
+  "y",
+]

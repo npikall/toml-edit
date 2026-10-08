@@ -92,8 +92,8 @@ func (l *Lexer) NextToken() token.Token {
 	case l.ch == '"' || l.ch == '\'':
 		tokType = l.readString()
 		l.expectValue = false
-	case isBareKeyChar(l.ch):
-		l.readWhile(isBareKeyChar)
+	case IsBareKeyChar(l.ch):
+		l.readWhile(IsBareKeyChar)
 		tokType = token.BARE_KEY
 	default:
 		l.readChar()
@@ -243,14 +243,15 @@ func isDigit(ch byte) bool {
 	return '0' <= ch && ch <= '9'
 }
 
-func isBareKeyChar(ch byte) bool {
+// IsBareKeyChar reports whether ch may appear in a bare key.
+func IsBareKeyChar(ch byte) bool {
 	return 'a' <= ch && ch <= 'z' || 'A' <= ch && ch <= 'Z' || '0' <= ch && ch <= '9' || ch == '_' || ch == '-'
 }
 
 // isScalarChar reports whether ch can be part of a bare value such as a
 // number, boolean or date.
 func isScalarChar(ch byte) bool {
-	return isBareKeyChar(ch) || ch == '+' || ch == '.' || ch == ':'
+	return IsBareKeyChar(ch) || ch == '+' || ch == '.' || ch == ':'
 }
 
 // Patterns follow the ABNF in the TOML v1.1.0 spec. Range checks (month 13,
