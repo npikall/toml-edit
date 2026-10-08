@@ -113,6 +113,14 @@ type KeyPart struct {
 	Decor
 	Type token.TokenType
 	Raw  string
+	Pos  Pos
+}
+
+// Pos is a 1-based source position (Col counts bytes). It is the zero value
+// for nodes that were not parsed from source.
+type Pos struct {
+	Line int
+	Col  int
 }
 
 // Decor is the whitespace (and, inside arrays and inline tables, comments
@@ -146,6 +154,7 @@ type Scalar struct {
 	Decor
 	Type token.TokenType
 	Raw  string
+	Pos  Pos
 }
 
 func (s *Scalar) writeRaw(sb *strings.Builder) { sb.WriteString(s.Raw) }

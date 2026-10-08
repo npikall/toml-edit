@@ -44,10 +44,10 @@ func TestParseKeepsKeyPartsAndDecor(t *testing.T) {
 	kv := doc.Root.Body[0]
 	parts := kv.Key.Parts
 	require.Len(t, parts, 3)
-	require.Equal(t, ast.KeyPart{Type: token.BARE_KEY, Raw: "a", Suffix: " "}, *parts[0])
-	require.Equal(t, ast.KeyPart{Type: token.BASIC_STRING, Raw: `"b c"`, Prefix: " "}, *parts[1])
-	require.Equal(t, ast.KeyPart{Type: token.LITERAL_STRING, Raw: "'d'", Suffix: "  "}, *parts[2])
-	require.Equal(t, &ast.Scalar{Type: token.INTEGER, Raw: "1", Prefix: " "}, kv.Value)
+	require.Equal(t, ast.KeyPart{Type: token.BARE_KEY, Raw: "a", Suffix: " ", Pos: ast.Pos{Line: 1, Col: 1}}, *parts[0])
+	require.Equal(t, ast.KeyPart{Type: token.BASIC_STRING, Raw: `"b c"`, Prefix: " ", Pos: ast.Pos{Line: 1, Col: 5}}, *parts[1])
+	require.Equal(t, ast.KeyPart{Type: token.LITERAL_STRING, Raw: "'d'", Suffix: "  ", Pos: ast.Pos{Line: 1, Col: 11}}, *parts[2])
+	require.Equal(t, &ast.Scalar{Type: token.INTEGER, Raw: "1", Prefix: " ", Pos: ast.Pos{Line: 1, Col: 18}}, kv.Value)
 }
 
 func TestParseTableHeaderKeyDecor(t *testing.T) {

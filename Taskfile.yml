@@ -70,6 +70,11 @@ tasks:
     cmds:
       - go test ./parser -run '^$' -fuzz FuzzParse -fuzztime {{.FUZZTIME | default "30s"}}
 
+  fuzz:eval:
+    desc: Fuzz the evaluator for panics (default 30s, override with FUZZTIME)
+    cmds:
+      - go test ./eval -run '^$' -fuzz FuzzEvaluate -fuzztime {{.FUZZTIME | default "30s"}}
+
   ci:
     desc: Run the full ci suite
     cmds:

@@ -129,7 +129,7 @@ func (p *parser) parseKey() (*ast.Key, error) {
 			return nil, unexpected(tok, "a key")
 		}
 		p.next()
-		part := &ast.KeyPart{Type: tok.Type, Raw: tok.Literal}
+		part := &ast.KeyPart{Type: tok.Type, Raw: tok.Literal, Pos: pos(tok)}
 		part.Prefix = prefix
 		part.Suffix = p.trivia(false)
 		key.Parts = append(key.Parts, part)
@@ -146,7 +146,7 @@ func (p *parser) parseValue() (ast.Value, error) {
 	switch tok := p.peek(); {
 	case isScalar(tok.Type):
 		p.next()
-		return &ast.Scalar{Type: tok.Type, Raw: tok.Literal}, nil
+		return &ast.Scalar{Type: tok.Type, Raw: tok.Literal, Pos: pos(tok)}, nil
 	case tok.Type == token.LBRACKET:
 		return p.parseArray()
 	case tok.Type == token.LBRACE:
@@ -296,6 +296,10 @@ func (p *parser) next() token.Token {
 		p.pos++
 	}
 	return tok
+}
+
+func pos(tok token.Token) ast.Pos {
+	return ast.Pos{Line: tok.Line, Col: tok.Col}
 }
 
 func unexpected(tok token.Token, want string) *ParseError {
