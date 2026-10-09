@@ -15,26 +15,34 @@ func decodeValue(v ast.Value) (any, error) {
 	case *ast.Scalar:
 		return decodeScalar(v)
 	case *ast.Array:
-		out := make([]any, len(v.Items))
-		for i, item := range v.Items {
-			var err error
-			if out[i], err = decodeValue(item.Value); err != nil {
-				return nil, err
-			}
-		}
-		return out, nil
+		return decodeArray(v)
 	case *ast.InlineTable:
-		t := newTable(kindInline)
-		t.inline = v
-		for _, entry := range v.Entries {
-			if err := insertKeyValue(t, entry.KeyValue); err != nil {
-				return nil, err
-			}
-		}
-		return t, nil
+		return decodeInlineTable(v)
 	default:
 		panic(fmt.Sprintf("eval: unexpected value node %T", v))
 	}
+}
+
+func decodeArray(arr *ast.Array) ([]any, error) {
+	out := make([]any, len(arr.Items))
+	for i, item := range arr.Items {
+		var err error
+		if out[i], err = decodeValue(item.Value); err != nil {
+			return nil, err
+		}
+	}
+	return out, nil
+}
+
+func decodeInlineTable(node *ast.InlineTable) (*Table, error) {
+	t := newTable(kindInline)
+	t.inline = node
+	for _, entry := range node.Entries {
+		if err := insertKeyValue(t, entry.KeyValue); err != nil {
+			return nil, err
+		}
+	}
+	return t, nil
 }
 
 func decodeScalar(s *ast.Scalar) (any, error) {

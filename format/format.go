@@ -32,30 +32,42 @@ var ErrUnsupported = errors.New("unsupported value")
 func Value(v any) (ast.Value, error) {
 	switch v := v.(type) {
 	case string:
-		if !utf8.ValidString(v) {
-			return nil, fmt.Errorf("%w: string %q is not valid UTF-8", ErrUnsupported, v)
-		}
-		return &ast.Scalar{Type: token.BASIC_STRING, Raw: quote(v)}, nil
+		return basicString(v)
 	case bool:
 		return &ast.Scalar{Type: token.BOOL, Raw: strconv.FormatBool(v)}, nil
 	case time.Time:
 		return offsetDateTime(v)
-	case eval.LocalDate:
-		return &ast.Scalar{Type: token.LOCAL_DATE, Raw: v.String()}, nil
-	case eval.LocalTime:
-		return &ast.Scalar{Type: token.LOCAL_TIME, Raw: v.String()}, nil
-	case eval.LocalDateTime:
-		return &ast.Scalar{Type: token.LOCAL_DATETIME, Raw: v.String()}, nil
+	case fmt.Stringer:
+		if typ, ok := localTypes[reflect.TypeOf(v)]; ok {
+			return &ast.Scalar{Type: typ, Raw: v.String()}, nil
+		}
 	}
-	rv := reflect.ValueOf(v)
+	return reflectValue(reflect.ValueOf(v), v)
+}
+
+// localTypes are the eval date/time types, which format themselves.
+var localTypes = map[reflect.Type]token.TokenType{
+	reflect.TypeFor[eval.LocalDate]():     token.LOCAL_DATE,
+	reflect.TypeFor[eval.LocalTime]():     token.LOCAL_TIME,
+	reflect.TypeFor[eval.LocalDateTime](): token.LOCAL_DATETIME,
+}
+
+func basicString(s string) (*ast.Scalar, error) {
+	if !utf8.ValidString(s) {
+		return nil, fmt.Errorf("%w: string %q is not valid UTF-8", ErrUnsupported, s)
+	}
+	return &ast.Scalar{Type: token.BASIC_STRING, Raw: quote(s)}, nil
+}
+
+// reflectValue formats the numbers, slices and maps of any named type.
+//
+//nolint:ireturn // ast.Value is a closed sum of Scalar, Array and InlineTable.
+func reflectValue(rv reflect.Value, v any) (ast.Value, error) {
 	switch {
 	case rv.CanInt():
 		return &ast.Scalar{Type: token.INTEGER, Raw: strconv.FormatInt(rv.Int(), 10)}, nil
 	case rv.CanUint():
-		if rv.Uint() > math.MaxInt64 {
-			return nil, fmt.Errorf("%w: integer %d overflows int64", ErrUnsupported, rv.Uint())
-		}
-		return &ast.Scalar{Type: token.INTEGER, Raw: strconv.FormatUint(rv.Uint(), 10)}, nil
+		return unsignedInteger(rv.Uint())
 	case rv.CanFloat():
 		return &ast.Scalar{Type: token.FLOAT, Raw: formatFloat(rv.Float(), rv.Type().Bits())}, nil
 	case rv.Kind() == reflect.Slice, rv.Kind() == reflect.Array:
@@ -64,6 +76,13 @@ func Value(v any) (ast.Value, error) {
 		return inlineTable(rv)
 	}
 	return nil, fmt.Errorf("%w: %T", ErrUnsupported, v)
+}
+
+func unsignedInteger(n uint64) (*ast.Scalar, error) {
+	if n > math.MaxInt64 {
+		return nil, fmt.Errorf("%w: integer %d overflows int64", ErrUnsupported, n)
+	}
+	return &ast.Scalar{Type: token.INTEGER, Raw: strconv.FormatUint(n, 10)}, nil
 }
 
 // Key returns a key part for name: bare if possible, else a basic string.

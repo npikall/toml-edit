@@ -279,3 +279,69 @@ func TestTableKeyValuePointsAtCST(t *testing.T) {
 		require.False(t, ok, key)
 	}
 }
+
+func TestEvaluateErrorsInEveryPosition(t *testing.T) {
+	const bad = `"\uD800"` // a surrogate is no valid code point
+	tests := map[string]string{
+		"invalid header key":        "[" + bad + "]",
+		"invalid header parent key": "[" + bad + ".b]",
+		"invalid key":               bad + " = 1",
+		"invalid dotted parent key": bad + ".b = 1",
+		"invalid array element":     "a = [1, 99999999999999999999]",
+		"invalid offset date-time":  "a = 1979-02-30T07:32:00Z",
+		"invalid local date-time":   "a = 1979-02-30T07:32:00",
+	}
+	for name, src := range tests {
+		t.Run(name, func(t *testing.T) {
+			_, err := evaluate(t, src)
+			var evalErr *eval.Error
+			require.ErrorAs(t, err, &evalErr)
+		})
+	}
+}
+
+func TestEvaluateDottedKeysExtendDottedTable(t *testing.T) {
+	requireEval(t, "a.b = 1\na.c = 2\n", map[string]any{"a": map[string]any{"b": int64(1), "c": int64(2)}})
+}
+
+func TestEvaluateTrimsCRLFAfterMultilineDelimiter(t *testing.T) {
+	requireEval(t, "a = \"\"\"\r\nx\"\"\"\n", map[string]any{"a": "x"})
+}
+
+func TestTableAccessorsReportHowTablesWereDefined(t *testing.T) {
+	root, err := evaluate(t, "d.x = 1\ni = {}\n[h]\n")
+	require.NoError(t, err)
+	require.NotNil(t, root.Section())
+	get := func(key string) *eval.Table {
+		v, ok := root.Get(key)
+		require.True(t, ok)
+		return v.(*eval.Table)
+	}
+	require.True(t, get("d").Dotted())
+	require.Nil(t, get("d").Section())
+	require.NotNil(t, get("i").Inline())
+	require.False(t, get("i").Dotted())
+	require.NotNil(t, get("h").Section())
+	require.Nil(t, get("h").Inline())
+}
+
+func TestKeyNames(t *testing.T) {
+	doc, err := parser.Parse("a.\"b c\".'d' = 1\n\"\\uD800\".e = 2\n")
+	require.NoError(t, err)
+
+	names, err := eval.KeyNames(doc.Root.Body[0].Key)
+	require.NoError(t, err)
+	require.Equal(t, []string{"a", "b c", "d"}, names)
+
+	_, err = eval.KeyNames(doc.Root.Body[1].Key)
+	require.Error(t, err)
+}
+
+func TestLocalDateTimeStrings(t *testing.T) {
+	date := eval.LocalDate{Year: 1979, Month: 5, Day: 27}
+	clock := eval.LocalTime{Hour: 7, Minute: 32}
+	require.Equal(t, "1979-05-27", date.String())
+	require.Equal(t, "07:32:00", clock.String())
+	require.Equal(t, "07:32:00.500000000", eval.LocalTime{Hour: 7, Minute: 32, Nanosecond: 5e8}.String())
+	require.Equal(t, "1979-05-27T07:32:00", eval.LocalDateTime{Date: date, Time: clock}.String())
+}

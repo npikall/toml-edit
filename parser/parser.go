@@ -72,12 +72,8 @@ func (p *parser) parseDocument() (*ast.Document, error) {
 			doc.Trailing = leading
 			return doc, nil
 		case isSimpleKey(tok.Type):
-			kv, err := p.parseKeyValue()
+			kv, err := p.parseLine(leading)
 			if err != nil {
-				return nil, err
-			}
-			kv.Leading = leading
-			if kv.Trailing, err = p.lineEnd(); err != nil {
 				return nil, err
 			}
 			current.Body = append(current.Body, kv)
@@ -93,6 +89,19 @@ func (p *parser) parseDocument() (*ast.Document, error) {
 			return nil, unexpected(tok, "a key or table header")
 		}
 	}
+}
+
+// parseLine parses a top-level key/value up to the end of its line.
+func (p *parser) parseLine(leading string) (*ast.KeyValue, error) {
+	kv, err := p.parseKeyValue()
+	if err != nil {
+		return nil, err
+	}
+	kv.Leading = leading
+	if kv.Trailing, err = p.lineEnd(); err != nil {
+		return nil, err
+	}
+	return kv, nil
 }
 
 // parseTableHeader parses "[key]" or "[[key]]" up to the end of its line.
@@ -195,16 +204,14 @@ func (p *parser) parseArray() (*ast.Array, error) {
 		decor.Suffix = p.trivia(true)
 		item := &ast.ArrayItem{Value: value}
 		arr.Items = append(arr.Items, item)
-		arr.TrailingComma = false
-		switch tok := p.next(); tok.Type {
-		case token.COMMA:
-			arr.TrailingComma = true
-			item.AfterComma = p.afterComma()
-		case token.RBRACKET:
-			return arr, nil
-		default:
-			return nil, unexpected(tok, `"," or "]"`)
+		comma, err := p.separator(token.RBRACKET, `"," or "]"`)
+		if err != nil {
+			return nil, err
 		}
+		if arr.TrailingComma = comma; !comma {
+			return arr, nil
+		}
+		item.AfterComma = p.afterComma()
 	}
 }
 
@@ -224,26 +231,46 @@ func (p *parser) parseInlineTable() (*ast.InlineTable, error) {
 			table.Trailing = leading
 			return table, nil
 		}
-		kv, err := p.parseKeyValue()
+		entry, err := p.parseInlineEntry(leading, toml11)
 		if err != nil {
 			return nil, err
 		}
-		kv.Leading = leading
-		kv.Trailing = p.trivia(toml11)
-		entry := &ast.InlineEntry{KeyValue: kv}
 		table.Entries = append(table.Entries, entry)
-		table.TrailingComma = false
-		switch tok := p.next(); tok.Type {
-		case token.COMMA:
-			table.TrailingComma = true
-			if toml11 {
-				entry.AfterComma = p.afterComma()
-			}
-		case token.RBRACE:
-			return table, nil
-		default:
-			return nil, unexpected(tok, `"," or "}"`)
+		comma, err := p.separator(token.RBRACE, `"," or "}"`)
+		if err != nil {
+			return nil, err
 		}
+		if table.TrailingComma = comma; !comma {
+			return table, nil
+		}
+		if toml11 {
+			entry.AfterComma = p.afterComma()
+		}
+	}
+}
+
+// parseInlineEntry parses one key/value of an inline table and the trivia
+// after it.
+func (p *parser) parseInlineEntry(leading string, toml11 bool) (*ast.InlineEntry, error) {
+	kv, err := p.parseKeyValue()
+	if err != nil {
+		return nil, err
+	}
+	kv.Leading = leading
+	kv.Trailing = p.trivia(toml11)
+	return &ast.InlineEntry{KeyValue: kv}, nil
+}
+
+// separator consumes the token after an array element or inline table
+// entry and reports whether it is a comma rather than closing.
+func (p *parser) separator(closing token.TokenType, want string) (bool, error) {
+	switch tok := p.next(); tok.Type {
+	case token.COMMA:
+		return true, nil
+	case closing:
+		return false, nil
+	default:
+		return false, unexpected(tok, want)
 	}
 }
 

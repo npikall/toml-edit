@@ -44,16 +44,14 @@ func multiline(arr *ast.Array) bool {
 }
 
 // layoutOf reads the layout of a multi-line array whose elements decode to
-// values. Elements sharing a line are spread one per line; newline is the
-// document's line ending, used where the array has none of its own.
+// values, one per element. Elements sharing a line are spread one per line;
+// newline is the document's line ending, used where the array has none of
+// its own.
 func layoutOf(arr *ast.Array, values []any, newline string) arrayLayout {
-	layout := arrayLayout{open: newline, indent: "  ", newline: newline, notes: map[string][]elementNote{}}
 	if len(arr.Items) == 0 {
-		open, closing, _ := strings.Cut(arr.Trailing, "\n")
-		layout.open, layout.closing = open+"\n", closing
-		layout.newline = lineEnding(layout.open)
-		return layout
+		return emptyLayout(arr)
 	}
+	layout := arrayLayout{open: newline, indent: "  ", newline: newline, notes: map[string][]elementNote{}}
 	first := ast.ValueDecor(arr.Items[0].Value).Prefix
 	if i := strings.Index(first, "\n"); i >= 0 {
 		layout.open = first[:i+1]
@@ -65,32 +63,43 @@ func layoutOf(arr *ast.Array, values []any, newline string) arrayLayout {
 	if arr.TrailingComma {
 		layout.closing = arr.Trailing
 	}
-	last := len(arr.Items) - 1
-	for i, item := range arr.Items {
-		d := ast.ValueDecor(item.Value)
-		prefix := d.Prefix
-		if i == 0 {
-			prefix = strings.TrimPrefix(prefix, layout.open)
-		}
-		note := elementNote{
-			value:    item.Value,
-			comments: strings.TrimSuffix(prefix, lastLine(prefix)),
-			after:    item.AfterComma,
-		}
-		// A comment between the value and its comma moves after the comma.
-		if j := strings.Index(d.Suffix, "\n"); j >= 0 {
-			note.after = d.Suffix[:j+1]
-			if i == last && !arr.TrailingComma {
-				layout.closing = d.Suffix[j+1:]
-			}
-		}
-		if i < len(values) {
-			if key, ok := canonical(values[i]); ok {
-				layout.notes[key] = append(layout.notes[key], note)
-			}
+	for i := range arr.Items {
+		if key, ok := canonical(values[i]); ok {
+			layout.notes[key] = append(layout.notes[key], layout.noteOf(arr, i))
 		}
 	}
 	return layout
+}
+
+// emptyLayout is the layout of an empty multi-line array.
+func emptyLayout(arr *ast.Array) arrayLayout {
+	open, closing, _ := strings.Cut(arr.Trailing, "\n")
+	open += "\n"
+	return arrayLayout{open: open, indent: "  ", newline: lineEnding(open), closing: closing}
+}
+
+// noteOf returns the note of element i of arr. A comment between the value
+// and its comma moves after the comma; on the last element without a comma,
+// the lines after that comment become the trivia before "]".
+func (layout *arrayLayout) noteOf(arr *ast.Array, i int) elementNote {
+	item := arr.Items[i]
+	d := ast.ValueDecor(item.Value)
+	prefix := d.Prefix
+	if i == 0 {
+		prefix = strings.TrimPrefix(prefix, layout.open)
+	}
+	note := elementNote{
+		value:    item.Value,
+		comments: strings.TrimSuffix(prefix, lastLine(prefix)),
+		after:    item.AfterComma,
+	}
+	if j := strings.Index(d.Suffix, "\n"); j >= 0 {
+		note.after = d.Suffix[:j+1]
+		if i == len(arr.Items)-1 && !arr.TrailingComma {
+			layout.closing = d.Suffix[j+1:]
+		}
+	}
+	return note
 }
 
 // firstOnOwnLine returns the index of the first element of arr that starts a
