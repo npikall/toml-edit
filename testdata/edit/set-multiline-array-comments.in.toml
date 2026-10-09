@@ -1,0 +1,11 @@
+deps = [ # pinned by hand
+  # core
+  'a', # keep me
+  "b", # goes away
+  # tail
+  "c" # last
+]
+more = [
+  "x",
+  # dangling
+]

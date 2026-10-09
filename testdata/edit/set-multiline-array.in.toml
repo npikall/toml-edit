@@ -1,0 +1,8 @@
+[tool.gotpm]
+dependencies = [
+  "@gotpm/a:1.0.0",
+]
+fonts = [
+    "Open Sans",
+    "Roboto"
+  ]

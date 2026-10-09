@@ -141,6 +141,13 @@ type Value interface {
 // ValueDecor returns the decor of v so callers can adjust its whitespace.
 func ValueDecor(v Value) *Decor { return v.decor() }
 
+// Raw returns the text of v without its decor.
+func Raw(v Value) string {
+	var sb strings.Builder
+	v.writeRaw(&sb)
+	return sb.String()
+}
+
 func writeValue(sb *strings.Builder, v Value) {
 	d := v.decor()
 	sb.WriteString(d.Prefix)

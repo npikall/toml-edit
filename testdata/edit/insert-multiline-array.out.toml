@@ -1,0 +1,14 @@
+[package]
+  name = "x"
+  point = { x = 1, y = [
+    1,
+  ] }
+  keywords = [
+    "x",
+  ]
+
+[tool.gotpm]
+dependencies = [
+  "a",
+  "b",
+]

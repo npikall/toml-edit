@@ -60,8 +60,8 @@ debug = true
 
 | Operation | Behavior |
 |---|---|
-| `Set` | Replaces only the value text. Key, spacing and trailing comment stay. The path must exist and hold a value, not a table. |
-| `Insert` | Appends to the end of the table section that owns the key, indented like its last key. Keys under a dotted-key table stay dotted, keys of inline tables go into the braces, keys of missing tables get a new `[header]` at the end of the file. |
+| `Set` | Replaces only the value text. Key, spacing and trailing comment stay. The path must exist and hold a value, not a table. An array written across several lines stays one element per line, with its indentation and a trailing comma; elements that remain keep their spelling and comments. |
+| `Insert` | Appends to the end of the table section that owns the key, indented like its last key. Keys under a dotted-key table stay dotted, keys of inline tables go into the braces, keys of missing tables get a new `[header]` at the end of the file. With `Multiline()`, an array is written one element per line. |
 | `Delete` | Removes the key with the comments and blank lines before it. Deleting a table removes its header, body and sub-tables. Commas in inline tables are fixed up. |
 
 Every edit is re-validated. An edit that would make the document invalid (for

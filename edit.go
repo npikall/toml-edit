@@ -105,6 +105,8 @@ func (d *Document) GetBool(keys ...string) (bool, error) { return get[bool](d, k
 
 // Set replaces the value of an existing key. Only the value's text changes;
 // the key, the whitespace around the value and a trailing comment are kept.
+// An array written across several lines stays one element per line with a
+// trailing comma; elements that remain keep their spelling and comments.
 func (d *Document) Set(path []string, value any) error {
 	if err := d.set(path, value); err != nil {
 		return fmt.Errorf("%s: %w", dotted(path), err)
@@ -112,10 +114,29 @@ func (d *Document) Set(path []string, value any) error {
 	return nil
 }
 
+// EditOption configures Insert. Set takes none: it follows the layout of
+// the value it replaces.
+type EditOption func(*editConfig)
+
+type editConfig struct {
+	multiline bool
+}
+
+// Multiline makes Insert write an array value one element per line, each
+// followed by a comma and indented two spaces deeper than the line of its
+// key.
+func Multiline() EditOption {
+	return func(c *editConfig) { c.multiline = true }
+}
+
 // Insert adds a new key with value at the end of the table section that
 // owns it, indented like the key/value before it.
-func (d *Document) Insert(path []string, value any) error {
-	if err := d.insert(path, value); err != nil {
+func (d *Document) Insert(path []string, value any, opts ...EditOption) error {
+	var cfg editConfig
+	for _, opt := range opts {
+		opt(&cfg)
+	}
+	if err := d.insert(path, value, cfg); err != nil {
 		return fmt.Errorf("%s: %w", dotted(path), err)
 	}
 	return nil
@@ -146,6 +167,14 @@ func (d *Document) set(path []string, value any) error {
 	node, err := format.Value(value)
 	if err != nil {
 		return fmt.Errorf("format: %w", err)
+	}
+	if oldArr, ok := kv.Value.(*ast.Array); ok && multiline(oldArr) {
+		if arr, ok := node.(*ast.Array); ok {
+			decoded, _ := d.Get(path...) // keyValue found path
+			oldValues, _ := decoded.([]any)
+			layout := layoutOf(oldArr, oldValues, d.newline())
+			layout.apply(arr)
+		}
 	}
 	*ast.ValueDecor(node) = *ast.ValueDecor(kv.Value)
 	old := kv.Value
@@ -180,7 +209,7 @@ func (d *Document) keyValue(path []string) (*ast.KeyValue, error) {
 	return kv, nil
 }
 
-func (d *Document) insert(path []string, value any) error {
+func (d *Document) insert(path []string, value any, cfg editConfig) error {
 	if len(path) == 0 {
 		return ErrNotFound
 	}
@@ -214,14 +243,23 @@ func (d *Document) insert(path []string, value any) error {
 		}
 	}
 	nl := d.newline()
+	spreadArray := func(indent string) {
+		if arr, ok := node.(*ast.Array); ok && cfg.multiline {
+			layout := newLayout(indent, nl)
+			layout.apply(arr)
+		}
+	}
 	switch {
 	case inline != nil:
+		spreadArray(sectionIndent(owner))
 		kv := newKeyValue(path[inlineDepth:], node, "")
 		return d.mutate(func() { appendEntry(inline, kv) })
 	case table.Section() != nil && depth == len(path)-1, table.Dotted():
+		spreadArray(sectionIndent(owner))
 		kv := newKeyValue(path[ownerDepth:], node, nl)
 		return d.mutate(func() { appendKeyValue(owner, kv) })
 	default:
+		spreadArray("")
 		// A missing or implicit table gets a [header] of its own.
 		kv := newKeyValue(path[len(path)-1:], node, nl)
 		return d.mutate(func() { appendTable(d.cst, path[:len(path)-1], kv, nl) })
@@ -307,6 +345,15 @@ func newKeyValue(path []string, value ast.Value, newline string) *ast.KeyValue {
 	key.Parts[len(key.Parts)-1].Suffix = " "
 	ast.ValueDecor(value).Prefix = " "
 	return &ast.KeyValue{Key: key, Value: value, Trailing: newline}
+}
+
+// sectionIndent returns the indentation of the last key/value of section,
+// which a key/value appended to it takes over.
+func sectionIndent(section *ast.Table) string {
+	if n := len(section.Body); n > 0 {
+		return lastLine(section.Body[n-1].Leading)
+	}
+	return ""
 }
 
 // appendKeyValue adds kv to the end of section with the indentation of the

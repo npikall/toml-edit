@@ -38,6 +38,35 @@ var editCases = map[string]func(*tomledit.Document) error{
 			d.Set([]string{"deps", "beta"}, []string{"z"}),
 		)
 	},
+	"set-multiline-array": func(d *tomledit.Document) error {
+		return errors.Join(
+			d.Set([]string{"tool", "gotpm", "dependencies"}, []string{"@gotpm/a:1.0.0", "@gotpm/b:2.0.0"}),
+			d.Set([]string{"tool", "gotpm", "fonts"}, []string{"Roboto", "Inter"}),
+		)
+	},
+	"set-multiline-array-comments": func(d *tomledit.Document) error {
+		return errors.Join(
+			d.Set([]string{"deps"}, []string{"c", "a", "d"}),
+			d.Set([]string{"more"}, []string{"y"}),
+		)
+	},
+	"set-multiline-array-edges": func(d *tomledit.Document) error {
+		return errors.Join(
+			d.Set([]string{"a"}, []int{1, 2}),
+			d.Set([]string{"b"}, []int{}),
+			d.Set([]string{"t", "x"}, []int{3}),
+			d.Set([]string{"m"}, []int{1, 4}),
+		)
+	},
+	"set-multiline-array-mixed": func(d *tomledit.Document) error {
+		return errors.Join(
+			d.Set([]string{"a"}, []int{1, 2, 3, 4}),
+			d.Set([]string{"b"}, []int{2, 1}),
+		)
+	},
+	"set-singleline-array": func(d *tomledit.Document) error {
+		return d.Set([]string{"tags"}, []string{"a", "b", "c"})
+	},
 	"set-crlf": func(d *tomledit.Document) error {
 		return d.Set([]string{"b"}, eval.LocalDate{Year: 2025, Month: 1, Day: 31})
 	},
@@ -61,6 +90,13 @@ var editCases = map[string]func(*tomledit.Document) error{
 			d.Insert([]string{"database", "url"}, "pg"),
 			d.Insert([]string{"server", "tls", "cert"}, "a.pem"),
 			d.Insert([]string{"a", "name"}, "A"),
+		)
+	},
+	"insert-multiline-array": func(d *tomledit.Document) error {
+		return errors.Join(
+			d.Insert([]string{"package", "point", "y"}, []int{1}, tomledit.Multiline()),
+			d.Insert([]string{"package", "keywords"}, []string{"x"}, tomledit.Multiline()),
+			d.Insert([]string{"tool", "gotpm", "dependencies"}, []string{"a", "b"}, tomledit.Multiline()),
 		)
 	},
 	"insert-inline-entry": func(d *tomledit.Document) error {
