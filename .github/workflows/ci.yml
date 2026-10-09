@@ -50,3 +50,48 @@ jobs:
       - uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
         with:
           version: v2.14
+
+  coverage:
+    name: Coverage badge
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+    needs: test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # needed to create a branch
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - uses: go-task/setup-task@a00fbb05ce67b35648be3c78cbc9fd85354c757e # v2.2.0
+
+      - name: Measure coverage
+        id: cover
+        run: echo "pct=$(task test:cover:pct)" >> "$GITHUB_OUTPUT"
+
+      - name: Publish badge to badges branch
+        env:
+          PCT: ${{ steps.cover.outputs.pct }}
+        run: |
+          color=$(awk -v p="$PCT" 'BEGIN { print (p >= 90) ? "brightgreen" : (p >= 80) ? "green" : (p >= 70) ? "yellow" : (p >= 60) ? "orange" : "red" }')
+          json=$(printf '{"schemaVersion":1,"label":"coverage","message":"%s%%","color":"%s"}' "$PCT" "$color")
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if git fetch --depth=1 origin badges; then
+            git switch -C badges FETCH_HEAD
+          else
+            git switch --orphan badges
+          fi
+          git rm -rq --ignore-unmatch .
+          git clean -fdq
+          echo "$json" > coverage.json
+          git add coverage.json
+          if git diff --cached --quiet; then
+            echo "Coverage unchanged at $PCT%"
+            exit 0
+          fi
+          git commit -m "chore: update coverage badge ($PCT%)"
+          git push origin badges
