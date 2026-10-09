@@ -2,6 +2,14 @@
 
 version: '3'
 
+vars:
+  # Packages and source files that count toward coverage and CRAP;
+  # cmd/ holds test harness binaries, not library code.
+  COVER_PKGS:
+    sh: go list ./... | grep -v /cmd/
+  CRAP_FILES:
+    sh: git ls-files '*.go' ':!:cmd/**' ':!:*_test.go'
+
 tasks:
   default:
     cmds:
@@ -57,8 +65,15 @@ tasks:
     sources:
       - '**/*.go'
     cmds:
-      - go test -coverprofile=c.out ./...
+      - go test -coverprofile=c.out {{catLines .COVER_PKGS}}
       - go tool cover -html=c.out
+
+  test:cover:pct:
+    desc: Print the total test coverage percentage
+    silent: true
+    cmds:
+      - go test -coverprofile=c.out {{catLines .COVER_PKGS}} > /dev/null
+      - go tool cover -func=c.out | awk '/^total:/ { sub("%", "", $NF); print $NF }'
 
   bench:
     desc: Run the benchmarks
@@ -90,6 +105,11 @@ tasks:
     desc: Fuzz the evaluator for panics (default 30s, override with FUZZTIME)
     cmds:
       - go test ./eval -run '^$' -fuzz FuzzEvaluate -fuzztime {{.FUZZTIME | default "30s"}}
+
+  crap:
+    desc: Run CRAP (Change Risk Anti-Pattern) analysis
+    cmds:
+      - go run github.com/unclebob/crap4go/cmd/crap4go@latest {{catLines .CRAP_FILES}}
 
   ci:
     desc: Run the full ci suite
