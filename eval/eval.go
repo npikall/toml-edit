@@ -113,30 +113,38 @@ func defineTable(root *Table, header *ast.TableHeader) (*Table, error) {
 	if err != nil {
 		return nil, err
 	}
-	existing, exists := t.entries[name]
 	if header.ArrayOfTables {
-		if exists && !t.aot[name] {
-			return nil, errorAt(last.Pos, "cannot define array of tables %q: key already defined", name)
-		}
-		element := newTable(kindExplicit)
-		elements, _ := existing.([]any)
-		t.set(name, append(elements, element))
-		if t.aot == nil {
-			t.aot = map[string]bool{}
-		}
-		t.aot[name] = true
-		return element, nil
+		return appendArrayElement(t, name, last.Pos)
 	}
-	if !exists {
+	switch existing := t.entries[name].(type) {
+	case nil:
 		child := newTable(kindExplicit)
 		t.set(name, child)
 		return child, nil
-	}
-	if child, ok := existing.(*Table); ok && child.kind == kindImplicit {
-		child.kind = kindExplicit
-		return child, nil
+	case *Table:
+		if existing.kind == kindImplicit {
+			existing.kind = kindExplicit
+			return existing, nil
+		}
 	}
 	return nil, errorAt(last.Pos, "table %q already defined", name)
+}
+
+// appendArrayElement adds a table to the array of tables name in t, which
+// a [[header]] opens, creating the array if needed.
+func appendArrayElement(t *Table, name string, pos ast.Pos) (*Table, error) {
+	existing, exists := t.entries[name]
+	if exists && !t.aot[name] {
+		return nil, errorAt(pos, "cannot define array of tables %q: key already defined", name)
+	}
+	element := newTable(kindExplicit)
+	elements, _ := existing.([]any)
+	t.set(name, append(elements, element))
+	if t.aot == nil {
+		t.aot = map[string]bool{}
+	}
+	t.aot[name] = true
+	return element, nil
 }
 
 // descendHeader returns the table named by one non-final part of a header
@@ -217,19 +225,24 @@ func descendDotted(t *Table, part *ast.KeyPart) (*Table, error) {
 		t.set(name, child)
 		return child, nil
 	case *Table:
-		switch v.kind {
-		case kindDotted:
-			return v, nil
-		case kindImplicit:
-			// Not defined yet, so the dotted key defines it.
-			v.kind = kindDotted
-			return v, nil
-		case kindExplicit, kindInline:
-		}
-		return nil, errorAt(part.Pos, "cannot add keys to table %q with a dotted key", name)
+		return extendDotted(v, name, part.Pos)
 	default:
 		return nil, errorAt(part.Pos, "key %q is already defined as a value", name)
 	}
+}
+
+// extendDotted returns t if a dotted key may add keys to it.
+func extendDotted(t *Table, name string, pos ast.Pos) (*Table, error) {
+	switch t.kind {
+	case kindDotted:
+		return t, nil
+	case kindImplicit:
+		// Not defined yet, so the dotted key defines it.
+		t.kind = kindDotted
+		return t, nil
+	case kindExplicit, kindInline:
+	}
+	return nil, errorAt(pos, "cannot add keys to table %q with a dotted key", name)
 }
 
 // KeyNames returns the decoded names of the parts of key.

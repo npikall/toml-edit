@@ -168,24 +168,23 @@ func (d *Document) set(path []string, value any) error {
 	if err != nil {
 		return fmt.Errorf("format: %w", err)
 	}
-	if oldArr, ok := kv.Value.(*ast.Array); ok && multiline(oldArr) {
-		if arr, ok := node.(*ast.Array); ok {
-			decoded, _ := d.Get(path...) // keyValue found path
-			oldValues, _ := decoded.([]any)
-			layout := layoutOf(oldArr, oldValues, d.newline())
-			layout.apply(arr)
-		}
-	}
+	d.keepArrayLayout(path, kv.Value, node)
 	*ast.ValueDecor(node) = *ast.ValueDecor(kv.Value)
-	old := kv.Value
-	kv.Value = node
-	root, err := eval.Evaluate(d.cst)
-	if err != nil {
-		kv.Value = old
-		return fmt.Errorf("evaluate: %w", err)
+	return d.mutate(func() { kv.Value = node })
+}
+
+// keepArrayLayout spreads node over several lines like old, the value at
+// path it replaces, if both are arrays and old is written across lines.
+func (d *Document) keepArrayLayout(path []string, old, node ast.Value) {
+	oldArr, ok := old.(*ast.Array)
+	arr, isArr := node.(*ast.Array)
+	if !ok || !isArr || !multiline(oldArr) {
+		return
 	}
-	d.root = root
-	return nil
+	decoded, _ := d.Get(path...) // keyValue found path
+	oldValues, _ := decoded.([]any)
+	layout := layoutOf(oldArr, oldValues, d.newline())
+	layout.apply(arr)
 }
 
 // keyValue returns the CST node that defines the value at path.
@@ -220,49 +219,81 @@ func (d *Document) insert(path []string, value any, cfg editConfig) error {
 	if err != nil {
 		return fmt.Errorf("format: %w", err)
 	}
-	// Walk to the deepest existing table on the path, remembering the
-	// nearest section that holds key/values for it.
-	table, depth := d.root, 0
-	owner, ownerDepth := table.Section(), 0
-	var inline *ast.InlineTable
-	inlineDepth := 0
-	for _, key := range path[:len(path)-1] {
-		v, ok := table.Get(key)
+	w, err := d.walk(path[:len(path)-1])
+	if err != nil {
+		return err
+	}
+	return d.mutate(d.placeKeyValue(path, node, w, cfg))
+}
+
+// placeKeyValue returns the change that adds "path = node" where walk w
+// stopped: into an inline table on the way, the section owning the table at
+// the end of the path, or a new [header].
+func (d *Document) placeKeyValue(path []string, node ast.Value, w walkResult, cfg editConfig) func() {
+	nl := d.newline()
+	switch {
+	case w.inline != nil:
+		spreadArray(node, cfg, sectionIndent(w.owner), nl)
+		kv := newKeyValue(path[w.inlineDepth:], node, "")
+		return func() { appendEntry(w.inline, kv) }
+	case w.table.Section() != nil && w.depth == len(path)-1, w.table.Dotted():
+		spreadArray(node, cfg, sectionIndent(w.owner), nl)
+		kv := newKeyValue(path[w.ownerDepth:], node, nl)
+		return func() { appendKeyValue(w.owner, kv) }
+	default:
+		spreadArray(node, cfg, "", nl)
+		// A missing or implicit table gets a [header] of its own.
+		kv := newKeyValue(path[len(path)-1:], node, nl)
+		return func() { appendTable(d.cst, path[:len(path)-1], kv, nl) }
+	}
+}
+
+// spreadArray writes node one element per line, indented two spaces deeper
+// than indent, if it is an array and cfg asks for multi-line arrays.
+func spreadArray(node ast.Value, cfg editConfig, indent, nl string) {
+	if arr, ok := node.(*ast.Array); ok && cfg.multiline {
+		layout := newLayout(indent, nl)
+		layout.apply(arr)
+	}
+}
+
+// walkResult is where a walk down a key path stopped: the deepest existing
+// table, the nearest section holding key/values for it and the innermost
+// inline table on the way, each with its depth in the path.
+type walkResult struct {
+	table       *eval.Table
+	depth       int
+	owner       *ast.Table
+	ownerDepth  int
+	inline      *ast.InlineTable
+	inlineDepth int
+}
+
+// walk follows path from the root as far as tables exist. It fails if a key
+// on the way holds no table.
+func (d *Document) walk(path []string) (walkResult, error) {
+	w := walkResult{table: d.root, owner: d.root.Section()}
+	for _, key := range path {
+		v, ok := w.table.Get(key)
 		if !ok {
 			break
 		}
-		if table, ok = v.(*eval.Table); !ok {
-			return ErrNotTable
+		if w.table, ok = v.(*eval.Table); !ok {
+			return w, ErrNotTable
 		}
-		depth++
-		if section := table.Section(); section != nil {
-			owner, ownerDepth = section, depth
-		}
-		if node := table.Inline(); node != nil {
-			inline, inlineDepth = node, depth
-		}
+		w.depth++
+		w.enter()
 	}
-	nl := d.newline()
-	spreadArray := func(indent string) {
-		if arr, ok := node.(*ast.Array); ok && cfg.multiline {
-			layout := newLayout(indent, nl)
-			layout.apply(arr)
-		}
+	return w, nil
+}
+
+// enter records the section or inline table of the table just entered.
+func (w *walkResult) enter() {
+	if section := w.table.Section(); section != nil {
+		w.owner, w.ownerDepth = section, w.depth
 	}
-	switch {
-	case inline != nil:
-		spreadArray(sectionIndent(owner))
-		kv := newKeyValue(path[inlineDepth:], node, "")
-		return d.mutate(func() { appendEntry(inline, kv) })
-	case table.Section() != nil && depth == len(path)-1, table.Dotted():
-		spreadArray(sectionIndent(owner))
-		kv := newKeyValue(path[ownerDepth:], node, nl)
-		return d.mutate(func() { appendKeyValue(owner, kv) })
-	default:
-		spreadArray("")
-		// A missing or implicit table gets a [header] of its own.
-		kv := newKeyValue(path[len(path)-1:], node, nl)
-		return d.mutate(func() { appendTable(d.cst, path[:len(path)-1], kv, nl) })
+	if node := w.table.Inline(); node != nil {
+		w.inline, w.inlineDepth = node, w.depth
 	}
 }
 

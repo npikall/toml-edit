@@ -94,6 +94,7 @@ func TestValueRejectsUnsupported(t *testing.T) {
 		struct{}{},
 		map[int]any{1: 1},
 		[]any{make(chan int)},
+		map[string]any{"a": make(chan int)},
 		time.Date(10000, 1, 1, 0, 0, 0, 0, time.UTC),
 		time.Date(-1, 1, 1, 0, 0, 0, 0, time.UTC),
 		time.Date(2000, 1, 1, 0, 0, 0, 0, time.FixedZone("LMT", 561)),

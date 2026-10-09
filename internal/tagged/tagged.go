@@ -5,6 +5,7 @@ package tagged
 import (
 	"fmt"
 	"math"
+	"reflect"
 	"strconv"
 	"time"
 
@@ -31,26 +32,32 @@ func fromValue(v any) any {
 			out[i] = fromValue(e)
 		}
 		return out
-	case string:
-		return tag("string", v)
-	case int64:
-		return tag("integer", strconv.FormatInt(v, 10))
-	case float64:
-		return tag("float", formatFloat(v))
-	case bool:
-		return tag("bool", strconv.FormatBool(v))
-	case time.Time:
-		return tag("datetime", v.Format(time.RFC3339Nano))
-	case eval.LocalDateTime:
-		return tag("datetime-local", v.String())
-	case eval.LocalDate:
-		return tag("date-local", v.String())
-	case eval.LocalTime:
-		return tag("time-local", v.String())
-	default:
+	}
+	scalar, ok := scalars[reflect.TypeOf(v)]
+	if !ok {
 		panic(fmt.Sprintf("tagged: unexpected value %T", v))
 	}
+	return tag(scalar.typ, scalar.format(v))
 }
+
+// scalarTag is the tagged JSON type of a scalar and how to write its value.
+type scalarTag struct {
+	typ    string
+	format func(any) string
+}
+
+var scalars = map[reflect.Type]scalarTag{
+	reflect.TypeFor[string]():             {"string", func(v any) string { return v.(string) }},
+	reflect.TypeFor[int64]():              {"integer", func(v any) string { return strconv.FormatInt(v.(int64), 10) }},
+	reflect.TypeFor[float64]():            {"float", func(v any) string { return formatFloat(v.(float64)) }},
+	reflect.TypeFor[bool]():               {"bool", func(v any) string { return strconv.FormatBool(v.(bool)) }},
+	reflect.TypeFor[time.Time]():          {"datetime", func(v any) string { return v.(time.Time).Format(time.RFC3339Nano) }},
+	reflect.TypeFor[eval.LocalDateTime](): {"datetime-local", stringer},
+	reflect.TypeFor[eval.LocalDate]():     {"date-local", stringer},
+	reflect.TypeFor[eval.LocalTime]():     {"time-local", stringer},
+}
+
+func stringer(v any) string { return v.(fmt.Stringer).String() }
 
 func formatFloat(f float64) string {
 	switch {

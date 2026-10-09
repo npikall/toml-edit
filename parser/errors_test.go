@@ -63,3 +63,8 @@ func TestParseStrict10RejectsTOML11Syntax(t *testing.T) {
 		})
 	}
 }
+
+func TestParseErrorMessageHasPosition(t *testing.T) {
+	_, err := parser.Parse("a =\n")
+	require.EqualError(t, err, "1:4: expected a value, found newline")
+}

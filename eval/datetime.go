@@ -64,30 +64,38 @@ const (
 )
 
 func decodeDateTime(s *ast.Scalar) (any, error) {
-	raw := s.Raw
+	var (
+		v  any
+		ok bool
+	)
 	switch s.Type {
 	case token.LOCAL_DATE:
-		d, ok := parseDate(raw)
-		if !ok {
-			return nil, errorAt(s.Pos, "invalid date %q", raw)
-		}
-		return d, nil
+		v, ok = parseDate(s.Raw)
 	case token.LOCAL_TIME:
-		t, ok := parseTime(raw)
-		if !ok {
-			return nil, errorAt(s.Pos, "invalid time %q", raw)
-		}
-		return t, nil
+		v, ok = parseTime(s.Raw)
 	case token.LOCAL_DATETIME:
-		d, okDate := parseDate(raw[:dateLen])
-		t, okTime := parseTime(raw[dateLen+1:])
-		if !okDate || !okTime {
-			return nil, errorAt(s.Pos, "invalid date-time %q", raw)
-		}
-		return LocalDateTime{Date: d, Time: t}, nil
+		v, ok = parseLocalDateTime(s.Raw)
 	default: // token.OFFSET_DATETIME
 		return decodeOffsetDateTime(s)
 	}
+	if !ok {
+		return nil, errorAt(s.Pos, "invalid %s %q", localNames[s.Type], s.Raw)
+	}
+	return v, nil
+}
+
+// localNames name the local date/time types in error messages.
+var localNames = map[token.TokenType]string{
+	token.LOCAL_DATE:     "date",
+	token.LOCAL_TIME:     "time",
+	token.LOCAL_DATETIME: "date-time",
+}
+
+// parseLocalDateTime parses "YYYY-MM-DDTHH:MM[:SS[.frac]]".
+func parseLocalDateTime(s string) (LocalDateTime, bool) {
+	d, okDate := parseDate(s[:dateLen])
+	t, okTime := parseTime(s[dateLen+1:])
+	return LocalDateTime{Date: d, Time: t}, okDate && okTime
 }
 
 func decodeOffsetDateTime(s *ast.Scalar) (time.Time, error) {

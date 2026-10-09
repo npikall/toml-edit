@@ -45,23 +45,14 @@ func (l *Lexer) readString() token.TokenType {
 func (l *Lexer) readSingleLineString(quote byte, escapes bool, valid token.TokenType) token.TokenType {
 	l.readChar() // opening quote
 	ok := true
-	for {
-		switch {
-		case l.atEOF() || l.ch == '\n' || l.ch == '\r':
-			return token.ILLEGAL // unterminated
-		case l.ch == quote:
-			l.readChar()
-			if !ok {
-				return token.ILLEGAL
-			}
-			return valid
-		case escapes && l.ch == '\\':
-			ok = l.readEscape() && ok
-		default:
-			ok = isStringChar(l.ch) && ok
-			l.readChar()
-		}
+	for !l.atLineEnd() && l.ch != quote {
+		ok = l.readStringChar(escapes) && ok
 	}
+	if l.ch != quote {
+		return token.ILLEGAL // unterminated
+	}
+	l.readChar()
+	return validIf(ok, valid)
 }
 
 func (l *Lexer) readMultilineString(quote byte, escapes bool, valid token.TokenType) token.TokenType {
@@ -69,35 +60,68 @@ func (l *Lexer) readMultilineString(quote byte, escapes bool, valid token.TokenT
 		l.readChar()
 	}
 	ok := true
-	for {
-		switch {
-		case l.atEOF():
-			return token.ILLEGAL // unterminated
-		case l.ch == quote:
-			// Up to two quotes may directly precede the closing delimiter.
-			n := 0
-			for l.ch == quote && !l.atEOF() {
-				l.readChar()
-				n++
-			}
-			if n >= delimLen {
-				if !ok || n > maxQuoteRunLen {
-					return token.ILLEGAL
-				}
-				return valid
-			}
-		case l.ch == '\n':
-			l.readChar()
-		case l.ch == '\r':
-			ok = l.peekChar() == '\n' && ok
-			l.readChar()
-		case escapes && l.ch == '\\':
-			ok = l.readMultilineEscape() && ok
-		default:
-			ok = isStringChar(l.ch) && ok
-			l.readChar()
+	for !l.atEOF() {
+		if l.ch != quote {
+			ok = l.readMultilineChar(escapes) && ok
+			continue
+		}
+		// Up to two quotes may directly precede the closing delimiter.
+		if n := l.readQuoteRun(quote); n >= delimLen {
+			return validIf(ok && n <= maxQuoteRunLen, valid)
 		}
 	}
+	return token.ILLEGAL // unterminated
+}
+
+// readQuoteRun reads a run of quote chars and returns its length.
+func (l *Lexer) readQuoteRun(quote byte) int {
+	n := 0
+	for l.ch == quote {
+		l.readChar()
+		n++
+	}
+	return n
+}
+
+// readMultilineChar reads one char, a newline or an escape inside a
+// multi-line string and reports whether it is valid there.
+func (l *Lexer) readMultilineChar(escapes bool) bool {
+	switch {
+	case l.ch == '\n':
+		l.readChar()
+		return true
+	case l.ch == '\r':
+		ok := l.peekChar() == '\n'
+		l.readChar()
+		return ok
+	case escapes && l.ch == '\\':
+		return l.readMultilineEscape()
+	default:
+		return l.readStringChar(false)
+	}
+}
+
+// readStringChar reads one char or, if escapes is set, an escape sequence
+// and reports whether it is valid inside a string.
+func (l *Lexer) readStringChar(escapes bool) bool {
+	if escapes && l.ch == '\\' {
+		return l.readEscape()
+	}
+	ok := isStringChar(l.ch)
+	l.readChar()
+	return ok
+}
+
+func (l *Lexer) atLineEnd() bool {
+	return l.atEOF() || l.ch == '\n' || l.ch == '\r'
+}
+
+// validIf returns typ if ok, else ILLEGAL.
+func validIf(ok bool, typ token.TokenType) token.TokenType {
+	if !ok {
+		return token.ILLEGAL
+	}
+	return typ
 }
 
 // readMultilineEscape handles a line-ending backslash, which trims the

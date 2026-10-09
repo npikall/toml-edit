@@ -499,3 +499,49 @@ func FuzzLexer(f *testing.F) {
 		}
 	})
 }
+
+func TestNextTokenStrict10RejectsTOML11Syntax(t *testing.T) {
+	for _, input := range []string{"t = 07:32", `s = "\e"`, `s = "\x41"`} {
+		l := New(input, Strict10())
+		var last token.Token
+		for tok := l.NextToken(); tok.Type != token.EOF; tok = l.NextToken() {
+			last = tok
+		}
+		require.Equal(t, token.TokenType(token.ILLEGAL), last.Type, "input %q", input)
+	}
+}
+
+func TestNextTokenBracketEdgeCases(t *testing.T) {
+	t.Run("bracket in key position of inline table", func(t *testing.T) {
+		requireTokens(t, "a = {[", []wantToken{
+			{token.BARE_KEY, "a"},
+			{token.WHITESPACE, " "},
+			{token.EQUALS, "="},
+			{token.WHITESPACE, " "},
+			{token.LBRACE, "{"},
+			{token.LBRACKET, "["},
+		})
+	})
+	t.Run("stray closing bracket", func(t *testing.T) {
+		requireTokens(t, "]", []wantToken{{token.RBRACKET, "]"}})
+	})
+	t.Run("open bracket at end of input", func(t *testing.T) {
+		requireTokens(t, "[", []wantToken{{token.LBRACKET, "["}})
+	})
+	t.Run("newline ends unterminated header", func(t *testing.T) {
+		requireTokens(t, "[a\nb = 1", []wantToken{
+			{token.LBRACKET, "["},
+			{token.BARE_KEY, "a"},
+			{token.NEWLINE, "\n"},
+			{token.BARE_KEY, "b"},
+			{token.WHITESPACE, " "},
+			{token.EQUALS, "="},
+			{token.WHITESPACE, " "},
+			{token.INTEGER, "1"},
+		})
+	})
+}
+
+func TestNextTokenStringWithInvalidUTF8IsIllegal(t *testing.T) {
+	requireTokens(t, "\"\xff\"", []wantToken{{token.ILLEGAL, "\"\xff\""}})
+}

@@ -240,3 +240,43 @@ func TestInsertUsesLineEndingOfFirstLine(t *testing.T) {
 	require.NoError(t, doc.Insert([]string{"b"}, 2))
 	require.Equal(t, "a = 1\ns = \"\"\"x\r\ny\"\"\"\nb = 2\n", doc.String())
 }
+
+func TestSetMultilineArrayEdgeCases(t *testing.T) {
+	tests := []struct {
+		name  string
+		src   string
+		value any
+		want  string
+	}{
+		{"empty array", "a = [\n]\n", []any{1, 2}, "a = [\n  1,\n  2,\n]\n"},
+		{"only closing on own line", "a = [1, 2\n]\n", []any{1, 2, 3}, "a = [\n  1,\n  2,\n  3,\n]\n"},
+		{"inline table element", "a = [\n  {x = 1},\n  2,\n]\n", []any{2, 3}, "a = [\n  2,\n  3,\n]\n"},
+		{"nested array keeps comment", "a = [\n  [1], # one\n  2,\n]\n", []any{[]any{1}, 3}, "a = [\n  [1], # one\n  3,\n]\n"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			doc := parse(t, tt.src)
+			require.NoError(t, doc.Set([]string{"a"}, tt.value))
+			require.Equal(t, tt.want, doc.String())
+		})
+	}
+}
+
+func TestInsertEdgeCases(t *testing.T) {
+	tests := []struct {
+		name string
+		src  string
+		path []string
+		want string
+	}{
+		{"multi-line inline table with CRLF", "p = {\r\n  x = 1\r\n}\r\n", []string{"p", "y"}, "p = {\r\n  x = 1,\r\n  y = 2\r\n}\r\n"},
+		{"after last line without newline", "a = 1", []string{"b"}, "a = 1\nb = 2\n"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			doc := parse(t, tt.src)
+			require.NoError(t, doc.Insert(tt.path, 2))
+			require.Equal(t, tt.want, doc.String())
+		})
+	}
+}

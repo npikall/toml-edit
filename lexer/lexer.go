@@ -53,66 +53,108 @@ func New(input string, opts ...Option) *Lexer {
 
 func (l *Lexer) NextToken() token.Token {
 	start, line, col := l.position, l.line, l.col
-
-	var tokType token.TokenType
-	switch {
-	case l.atEOF():
+	if l.atEOF() {
 		return token.Token{Type: token.EOF, Line: line, Col: col}
+	}
+	tokType := l.scan(start)
+	return token.Token{Type: tokType, Literal: l.input[start:l.position], Line: line, Col: col}
+}
+
+// scan reads the token starting at start and returns its type. A bare value
+// is checked before "." and bare keys, as it may start with or contain them.
+func (l *Lexer) scan(start int) token.TokenType {
+	if read := punctuation[l.ch]; read != nil {
+		return read(l)
+	}
+	switch {
+	case l.expectValue && isScalarChar(l.ch):
+		return l.readValue(start)
 	case isWhitespace(l.ch):
 		l.readWhile(isWhitespace)
-		tokType = token.WHITESPACE
-	case l.ch == '\n', l.ch == '\r' && l.peekChar() == '\n':
-		if l.ch == '\r' {
-			l.readChar()
-		}
-		l.readChar()
-		l.endLine()
-		tokType = token.NEWLINE
-	case l.ch == '#':
-		tokType = l.readComment()
-	case l.ch == '=':
-		l.readChar()
-		l.expectValue = true
-		tokType = token.EQUALS
-	case l.expectValue && isScalarChar(l.ch):
-		l.readScalar()
-		l.expectValue = false
-		tokType = l.valueType(l.input[start:l.position])
+		return token.WHITESPACE
 	case l.ch == '.':
 		l.readChar()
-		tokType = token.DOT
-	case l.ch == ',':
-		l.readChar()
-		l.expectValue = l.top() == ctxArray
-		tokType = token.COMMA
-	case l.ch == '[':
-		tokType = l.readOpenBracket()
-	case l.ch == ']':
-		tokType = l.readCloseBracket()
-	case l.ch == '{':
-		l.readChar()
-		if l.expectValue {
-			l.push(ctxInlineTable)
-			l.expectValue = false
-		}
-		tokType = token.LBRACE
-	case l.ch == '}':
-		l.readChar()
-		if l.top() == ctxInlineTable {
-			l.pop()
-		}
-		tokType = token.RBRACE
-	case l.ch == '"' || l.ch == '\'':
-		tokType = l.readString()
-		l.expectValue = false
+		return token.DOT
 	case IsBareKeyChar(l.ch):
 		l.readWhile(IsBareKeyChar)
-		tokType = token.BARE_KEY
+		return token.BARE_KEY
 	default:
 		l.readChar()
-		tokType = token.ILLEGAL
+		return token.ILLEGAL
 	}
-	return token.Token{Type: tokType, Literal: l.input[start:l.position], Line: line, Col: col}
+}
+
+// punctuation maps the first char of a token that is never part of a bare
+// value or key to the method reading it.
+var punctuation = [256]func(*Lexer) token.TokenType{
+	'\n': (*Lexer).readNewline,
+	'\r': (*Lexer).readNewline,
+	'#':  (*Lexer).readComment,
+	'=':  (*Lexer).readEquals,
+	',':  (*Lexer).readComma,
+	'[':  (*Lexer).readOpenBracket,
+	']':  (*Lexer).readCloseBracket,
+	'{':  (*Lexer).readOpenBrace,
+	'}':  (*Lexer).readCloseBrace,
+	'"':  (*Lexer).readStringValue,
+	'\'': (*Lexer).readStringValue,
+}
+
+// readNewline reads "\n" or "\r\n". A lone "\r" is ILLEGAL.
+func (l *Lexer) readNewline() token.TokenType {
+	cr := l.ch == '\r'
+	l.readChar()
+	if cr {
+		if l.ch != '\n' {
+			return token.ILLEGAL
+		}
+		l.readChar()
+	}
+	l.endLine()
+	return token.NEWLINE
+}
+
+func (l *Lexer) readEquals() token.TokenType {
+	l.readChar()
+	l.expectValue = true
+	return token.EQUALS
+}
+
+func (l *Lexer) readComma() token.TokenType {
+	l.readChar()
+	l.expectValue = l.top() == ctxArray
+	return token.COMMA
+}
+
+func (l *Lexer) readOpenBrace() token.TokenType {
+	l.readChar()
+	if l.expectValue {
+		l.push(ctxInlineTable)
+		l.expectValue = false
+	}
+	return token.LBRACE
+}
+
+func (l *Lexer) readCloseBrace() token.TokenType {
+	l.readChar()
+	if l.top() == ctxInlineTable {
+		l.pop()
+	}
+	return token.RBRACE
+}
+
+// readValue reads a bare value such as a number, boolean or date.
+func (l *Lexer) readValue(start int) token.TokenType {
+	l.readScalar()
+	l.expectValue = false
+	return l.valueType(l.input[start:l.position])
+}
+
+// readStringValue reads a string, which is a key or a value.
+func (l *Lexer) readStringValue() token.TokenType {
+	typ := l.readString()
+	l.expectValue = false
+	return typ
 }
 
 // readComment reads up to the end of the line. A comment containing control
@@ -258,8 +300,16 @@ func isDigit(ch byte) bool {
 
 // IsBareKeyChar reports whether ch may appear in a bare key.
 func IsBareKeyChar(ch byte) bool {
-	return 'a' <= ch && ch <= 'z' || 'A' <= ch && ch <= 'Z' || '0' <= ch && ch <= '9' || ch == '_' || ch == '-'
+	return bareKeyChars[ch]
 }
+
+var bareKeyChars = func() [256]bool {
+	var set [256]bool
+	for _, ch := range []byte("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_-") {
+		set[ch] = true
+	}
+	return set
+}()
 
 // isScalarChar reports whether ch can be part of a bare value such as a
 // number, boolean or date.
@@ -307,23 +357,27 @@ func (l *Lexer) valueType(lit string) token.TokenType {
 	return typ
 }
 
+// scalarPatterns are tried in order; a literal matching none is ILLEGAL.
+var scalarPatterns = []struct {
+	match func(string) bool
+	typ   token.TokenType
+}{
+	{isBool, token.BOOL},
+	{reInteger.MatchString, token.INTEGER},
+	{reFloat.MatchString, token.FLOAT},
+	{reLocalDate.MatchString, token.LOCAL_DATE},
+	{reLocalTime.MatchString, token.LOCAL_TIME},
+	{reLocalDateTime.MatchString, token.LOCAL_DATETIME},
+	{reOffsetDateTime.MatchString, token.OFFSET_DATETIME},
+}
+
+func isBool(lit string) bool { return lit == "true" || lit == "false" }
+
 func classifyScalar(lit string) token.TokenType {
-	switch {
-	case lit == "true" || lit == "false":
-		return token.BOOL
-	case reInteger.MatchString(lit):
-		return token.INTEGER
-	case reFloat.MatchString(lit):
-		return token.FLOAT
-	case reLocalDate.MatchString(lit):
-		return token.LOCAL_DATE
-	case reLocalTime.MatchString(lit):
-		return token.LOCAL_TIME
-	case reLocalDateTime.MatchString(lit):
-		return token.LOCAL_DATETIME
-	case reOffsetDateTime.MatchString(lit):
-		return token.OFFSET_DATETIME
-	default:
-		return token.ILLEGAL
+	for _, p := range scalarPatterns {
+		if p.match(lit) {
+			return p.typ
+		}
 	}
+	return token.ILLEGAL
 }
