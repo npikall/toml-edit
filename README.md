@@ -1,5 +1,6 @@
 # tomledit
 
+[![Go Reference](https://pkg.go.dev/badge/github.com/npikall/toml-edit.svg)](https://pkg.go.dev/github.com/npikall/toml-edit)
 [![Coverage](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/npikall/toml-edit/badges/coverage.json)](https://github.com/npikall/toml-edit/actions/workflows/ci.yml)
 
 Format-preserving TOML for Go. Read a TOML file, change a few values, write
